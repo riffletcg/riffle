@@ -124,11 +124,6 @@ def _made(path: Path) -> datetime:
     return datetime.fromtimestamp(path.stat().st_mtime_ns // 1_000_000_000, UTC)
 
 
-def stamp(path: Path) -> str:
-    """The stamp an export is kept under: its file's modification time in UTC, to the second."""
-    return runs.name(_made(path))
-
-
 @dataclass(frozen=True)
 class Kept:
     """An export kept: the file, its SHA-256, and when its stamp says it was made."""

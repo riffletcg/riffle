@@ -90,6 +90,17 @@ def test_find_by_txt_path_md_path_and_slug(tmp_path):
     assert vault.find(root, str(txt)).entries[0].name == "Bolt"
 
 
+def test_a_txt_list_saved_on_windows_reads_like_any_other(tmp_path):
+    p = tmp_path / "list.txt"
+    p.write_bytes("\ufeff4 Lightning Bolt\r\n\r\n2 Duress\r\n".encode("utf-8"))
+    d = vault.from_file(str(p))
+    assert d.slug == "list"
+    assert [(e.board, e.quantity, e.name) for e in d.entries] == [
+        ("main", 4, "Lightning Bolt"),
+        ("sideboard", 2, "Duress"),
+    ]
+
+
 def test_find_errors_are_specific(tmp_path):
     bad = tmp_path / "bad.md"
     bad.write_text("no frontmatter")

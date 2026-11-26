@@ -141,8 +141,6 @@ MANA_POOL = tuple(
     for name in ("singles", "variants", "sealed")
 )
 
-STORES = {lists[0].store: lists for lists in (CARD_KINGDOM, MANA_POOL)}
-
 Fetch = Callable[..., net.Fetched | None]  # net.fetch_new
 
 

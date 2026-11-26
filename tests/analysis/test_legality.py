@@ -21,17 +21,14 @@ def _messages(rep):
 def test_card_status_and_copy_limits(cat):
     assert legality.is_legal("o-bolt", "modern", cat)
     assert not legality.is_legal("o-bolt", "pioneer", cat)
+    # a card with no entry for the format isn't legal in it
+    assert not legality.is_legal("o-crypt", "legacy", cat)
     assert legality.is_legal("o-sol", "vintage", cat)  # restricted still counts as legal
     assert legality.copy_limit("o-sol", "vintage", cat) == 1
     assert legality.copy_limit("o-bolt", "modern", cat) == 4
     assert legality.copy_limit("o-bolt", "commander", cat) == 1
     assert legality.copy_limit("o-snowf", "commander", cat) is None  # snow basics are basics
     assert legality.copy_limit("o-rats", "commander", cat) is None  # "any number of cards named"
-
-
-def test_playset_eligibility(cat):
-    assert legality.playset_eligible("o-bolt", cat)
-    assert not legality.playset_eligible("o-crypt", cat)  # vintage isn't a built format
 
 
 def test_format_aliases():

@@ -158,9 +158,9 @@ def _set_aside(path: Path) -> Path:
     return dest
 
 
-def fetch_sets(dest: Path | None = None) -> Path:
+def fetch_sets() -> Path:
     """Scryfall's set list, every page of it, saved as one list object."""
-    dest = dest or sets_path()
+    dest = sets_path()
     found: list[dict] = []
     url: str | None = SETS
     while url:
@@ -578,11 +578,11 @@ def bulk_day(bulk: Path) -> date:
     return bulk_updated_at(bulk).date()
 
 
-def snapshot_prices(bulk: Path | None = None) -> tuple[Path, bool]:
+def snapshot_prices() -> tuple[Path, bool]:
     """Keep the bulk file's prices for its day. Returns (file, whether it was written now).
     A bulk file cut short or corrupt is set aside, so the next online refresh downloads it
     again, and CorruptBulk says so."""
-    bulk = bulk or bulk_file()
+    bulk = bulk_file()
     if bulk is None:
         raise FileNotFoundError("no Scryfall bulk file yet")
     dest = prices_dir() / f"{bulk_day(bulk).isoformat()}.jsonl.gz"

@@ -384,7 +384,6 @@ def test_sizes_under_a_megabyte_are_in_kilobytes():
 def test_every_store_list_has_its_own_folder():
     lists = [*pricelists.CARD_KINGDOM, *pricelists.MANA_POOL]
     assert len({(p.store, p.name) for p in lists}) == len({p.label for p in lists}) == len(lists) == 5
-    assert pricelists.STORES == {"cardkingdom": pricelists.CARD_KINGDOM, "manapool": pricelists.MANA_POOL}
 
 
 # ---- the lists kept a day, before 2026-09-29 ---------------------------------------------------

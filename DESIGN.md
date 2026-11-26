@@ -66,7 +66,7 @@ a sync service copies. Config is `~/.config/riffle/config.toml`: `vault` names t
 |---|---|---|
 | 1 | Collection truth: Scryfall + ManaBox, `riffle own` | done |
 | 2 | Obsidian export: `_generated/`, `riffle sync` | done |
-| 3 | Analysis: mana demand/supply, curve, legality, playset eligibility | legality + playsets done; mana not started |
+| 3 | Analysis: mana demand/supply, curve, legality | legality done; mana not started |
 | 4 | Prices and logging: paper + MTGO, price log, list versions | done — log rollup still to do |
 | 5 | Metagame ingest: MTGO decklists only | ingest + card stats done |
 | — | Export: Moxfield, ManaBox, MTGO .txt, TCGplayer mass entry, owned-printing pins | done |

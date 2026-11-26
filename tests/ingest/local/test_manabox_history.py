@@ -246,7 +246,8 @@ def test_the_history_folder_is_manabox_in_the_data_folder():
 
 def test_the_stamp_is_the_files_modification_time_in_utc_to_the_second(tmp_path, denver):
     export = write_export(tmp_path / "ManaBox_Collection 7.csv", OLD, T7.replace(microsecond=250_000))
-    assert manabox.stamp(export) == "2026-10-18T084152Z"
+    kept, _ = manabox.keep(export, tmp_path / "manabox")
+    assert kept.path.stem == "2026-10-18T084152Z"
 
 
 def test_an_export_is_kept_as_its_stamp_with_its_sha256_beside_it_and_its_time(tmp_path):
@@ -330,7 +331,8 @@ def test_the_stamp_truncates_a_time_a_hair_short_of_the_next_second(tmp_path):
     export = write_export(tmp_path / "ManaBox_Collection 7.csv", OLD, T7)
     ns = int(T7.timestamp()) * 1_000_000_000 + 999_999_500
     os.utime(export, ns=(ns, ns))
-    assert manabox.stamp(export) == "2026-10-18T084152Z"
+    kept, _ = manabox.keep(export, tmp_path / "manabox")
+    assert kept.path.stem == "2026-10-18T084152Z"
 
 
 def test_kept_passes_over_a_folder_and_hashes_past_a_sha256_it_cant_read(tmp_path):

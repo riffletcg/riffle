@@ -81,4 +81,3 @@ class Status:
     runs: str | None = None
     last_exit: str | None = None
     state: str | None = None
-    program: str | None = None

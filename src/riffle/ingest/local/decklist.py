@@ -13,7 +13,6 @@ sideboard only in MTGO-style lists (no headers).
 """
 
 import re
-from pathlib import Path
 
 from riffle.models import Deck, DeckEntry
 
@@ -68,7 +67,3 @@ def parse_text(text: str, slug: str = "deck") -> Deck:
         )
         saw_main = saw_main or board == "main"
     return deck
-
-
-def load(path: Path) -> Deck:
-    return parse_text(path.read_text(encoding="utf-8-sig"), slug=path.stem)

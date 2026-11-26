@@ -179,15 +179,13 @@ def installed_jobs(
     return [(job, st) for job, st in found if st.installed or st.loaded]
 
 
-def job_logs(
-    jobs: list[schedule.Job], read: Callable[[Path], list[joblogs.Run]] = joblogs.read
-) -> tuple[dict[schedule.Job, list[joblogs.Run]], list[str]]:
+def job_logs(jobs: list[schedule.Job]) -> tuple[dict[schedule.Job, list[joblogs.Run]], list[str]]:
     """Each job's runs from its log, and what's said of each log that can't be read."""
     found, unread = {}, []
     for job in jobs:
         path = schedule.log_path(job)
         try:
-            found[job] = read(path)
+            found[job] = joblogs.read(path)
         except (OSError, UnicodeDecodeError) as e:
             unread.append(f"{path.name}: {unreadable(e)}")
     return found, unread
@@ -251,7 +249,6 @@ def _steps_failed(logs: dict[schedule.Job, list[joblogs.Run]], now: datetime) ->
 
 def jobs_lines(
     status: Callable[[schedule.Job], schedule.Status] = lambda job: schedule.status(job=job),
-    read: Callable[[Path], list[joblogs.Run]] = joblogs.read,
     now: datetime | None = None,
     days: int = DAYS,
 ) -> list[str]:
@@ -267,7 +264,7 @@ def jobs_lines(
     if not installed:
         return ["none installed (riffle schedule set, riffle schedule trickle, riffle schedule watch)"]
     now = now or times.now()
-    logs, unread = job_logs([job for job, _ in installed], read)
+    logs, unread = job_logs([job for job, _ in installed])
     sync = _sync_failing(logs.get(schedule.SYNC, []))
     said = [f"{sum(st.loaded for _, st in installed)} of {len(installed)} loaded"]
     said += [f"{_name(job)} isn't" for job, st in installed if not st.loaded]
