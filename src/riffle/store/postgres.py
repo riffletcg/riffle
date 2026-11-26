@@ -199,7 +199,9 @@ PRINTINGS_AT = text(f"""
     FROM unnest(CAST(:codes AS text[]), CAST(:numbers AS text[])) AS w (code, number)
     CROSS JOIN LATERAL (
         {_PRINTING}
-        WHERE p.set_id = (SELECT set_id FROM sets WHERE game_id = '{GAME}' AND code = w.code)
+        WHERE p.set_id = (
+            SELECT set_id FROM sets WHERE game_id = '{GAME}' AND code = w.code AND retired_at IS NULL
+        )
           AND p.collector_number = w.number AND p.game_id = '{GAME}' AND p.retired_at IS NULL
         ORDER BY p.lang <> 'en', e.external_id
         LIMIT 1

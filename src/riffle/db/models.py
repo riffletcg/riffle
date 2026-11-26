@@ -77,9 +77,20 @@ class Set(Base):
 
     __tablename__ = "sets"
     __table_args__ = (
-        UniqueConstraint("game_id", "code"),
         UniqueConstraint("game_id", "set_id"),  # what child rows' (game_id, set_id) keys reference
         ForeignKeyConstraint(["game_id", "parent_set_id"], ["sets.game_id", "sets.set_id"]),
+        # One live set per code in a game, checked at commit like printings' numbers: a
+        # source can give one set's code to another in a single update, and a retired set
+        # gives its code up.
+        ExcludeConstraint(
+            (text("game_id"), "="),
+            (text("code"), "="),
+            name="ex_sets_game_id_code",
+            using="btree",
+            where=text("retired_at IS NULL"),
+            deferrable=True,
+            initially="DEFERRED",
+        ),
     )
 
     set_id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True)

@@ -3,7 +3,7 @@
 import pytest
 from alembic.autogenerate import compare_metadata
 from alembic.runtime.migration import MigrationContext
-from sqlalchemy import insert, inspect, select
+from sqlalchemy import insert, inspect, select, text
 from sqlalchemy.exc import IntegrityError
 
 from riffle import config, db
@@ -62,6 +62,25 @@ def test_downgrade_to_empty_and_back(pg_engine):
     with pg_engine.connect() as conn:
         codes = conn.execute(select(Game.game_id).order_by(Game.game_id)).scalars().all()
     assert codes == ["fab", "mtg", "op"]
+
+
+def set_code_constraints(conn):
+    """The names of the constraints on `sets` that hold a code to one set per game."""
+    names = conn.execute(
+        text("SELECT conname FROM pg_constraint WHERE conrelid = 'sets'::regclass")
+    ).scalars()
+    return {n for n in names if n in {"uq_sets_game_id_code", "ex_sets_game_id_code"}}
+
+
+def test_set_codes_are_held_by_the_exclusion_constraint_and_the_downgrade_restores_the_unique_one(pg_engine):
+    with pg_engine.connect() as conn:
+        assert set_code_constraints(conn) == {"ex_sets_game_id_code"}
+    migrate.downgrade(pg_engine, "0002")
+    try:
+        with pg_engine.connect() as conn:
+            assert set_code_constraints(conn) == {"uq_sets_game_id_code"}
+    finally:
+        migrate.upgrade(pg_engine)
 
 
 def test_db_status_names_the_server_and_a_schema_at_head(pg_engine):
