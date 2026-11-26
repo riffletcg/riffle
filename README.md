@@ -20,7 +20,7 @@ Riffle is in development. So far it:
 - exports a deck, or what it lacks, to Moxfield, ManaBox, MTGO, or TCGplayer;
 - writes all of it into an Obsidian vault and keeps the notes current.
 
-Site: [riffletcg.gg](https://riffletcg.gg). Design: [DESIGN.md](DESIGN.md).
+Site: [riffletcg.gg](https://riffletcg.gg).
 
 ## Install
 
@@ -73,20 +73,20 @@ riffle sync                        # picks up a new ManaBox export from ~/Downlo
                                    # prices, writes what changed in _generated/, appends _log/
 riffle decks                       # deck notes the vault holds: format, strategy, colors, cards
 riffle decks --format modern --strategy control --sort to-buy
-riffle own aesi-lands              # ○ what to buy (default); numbers are copies in the deck
-riffle own aesi-lands -a           # ○ buy, then ✓ own
-riffle own aesi-lands -s own       # just what you have
-riffle own aesi-lands --arena      # against your Arena collection, with wildcard counts
-riffle price yshtola-spellslinger --budget-tix 500
+riffle own krenko-goblins          # ○ what to buy (default); numbers are copies in the deck
+riffle own krenko-goblins -a       # ○ buy, then ✓ own
+riffle own krenko-goblins -s own   # just what you have
+riffle own krenko-goblins --arena  # against your Arena collection, with wildcard counts
+riffle price amulet-titan --budget-tix 500
 riffle prices log "Gaea's Cradle"  # its price on every Scryfall day kept; no name: every buy card
-riffle export aesi-lands --to moxfield -o ~/Downloads/aesi.txt   # owned printings pinned
-riffle export all --to manabox -o ~/Downloads/mtg-exports        # every deck, one file each
+riffle export krenko-goblins --to moxfield -o ~/Downloads/krenko.txt   # owned printings pinned
+riffle export all --to manabox -o ~/Downloads/mtg-exports              # every deck, one file each
 riffle export izzet-murktide --to mtgo
-riffle export aesi-lands --to tcgplayer        # mass-entry list of the shortfall
-riffle ingest arena ~/Downloads/mtga_collection.txt              # text list or CSV
+riffle export krenko-goblins --to tcgplayer    # mass-entry list of the shortfall
+riffle ingest arena ~/Downloads/mtga_collection.txt                    # text list or CSV
 riffle ingest manabox --diff       # the newest export in ~/Downloads, and every copy it changed
 riffle ingest manabox ~/.local/share/riffle/manabox/2026-10-11T071014Z.csv   # put an export back
-riffle legal aesi-lands            # size, copies, bans, commander color identity
+riffle legal krenko-goblins        # size, copies, bans, commander color identity
 riffle legal all                   # every deck; exits 1 if any is illegal
 riffle legal my-deck -f modern     # check against a different format
 ```
@@ -396,23 +396,8 @@ Scryfall ID, so a rebuild from the same files gives the same IDs anywhere.
 Scryfall rarely renames an ID; `src/riffle/db/aliases.toml` maps a renamed one
 back to the ID it started from.
 
-Tests marked `postgres` use a separate `tcg_test` database, recreated on every
-run; without a reachable server they skip. Every test runs with its own config
-and data folders and an unreachable database URL, so none can touch real data.
-
-Every `uv run pytest` also measures line and branch coverage and lists the files
-with untested code. CI's Linux jobs, which run every test against Postgres, fail
-below 90%; `--no-cov` skips the measurement.
-
-Git hooks run the same checks before your commits and pushes. Turn them on once
-per clone:
-
-```bash
-git config core.hooksPath .githooks
-```
-
-`pre-commit` runs ruff's lint and format checks; `pre-push` runs everything CI
-does, with the 90% floor, and needs Postgres up (`riffle db up`).
+How the tests run, the `tcg_test` database they use, and the git hooks are in
+[CONTRIBUTING.md](CONTRIBUTING.md#for-invited-contributors).
 
 ## GitHub Codespaces
 

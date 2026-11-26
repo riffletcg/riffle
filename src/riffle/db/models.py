@@ -6,8 +6,8 @@ printings is checked by a test of its behavior instead.
 The catalog tables are shared by every game and carry game_id in every row and
 every foreign key, so the database itself refuses, say, a Flesh and Blood
 printing of a Magic card. Each game adds its own columns in extension tables
-(mtg_cards, mtg_printings), one row per shared row. Design: DESIGN.md and the
-schema notes; how rows get their IDs: riffle.db.ids.
+(mtg_cards, mtg_printings), one row per shared row. How rows get their IDs:
+riffle.db.ids.
 """
 
 import uuid

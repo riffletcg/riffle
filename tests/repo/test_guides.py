@@ -1,10 +1,10 @@
-"""The README, the design note, and the contributing guide work for anyone who clones Riffle."""
+"""The README and the contributing guide work for anyone who clones Riffle."""
 
 import re
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
-GUIDES = ["README.md", "DESIGN.md", "CONTRIBUTING.md"]
+GUIDES = ["README.md", "CONTRIBUTING.md"]
 
 
 def test_the_guides_name_no_one_s_own_folders():
