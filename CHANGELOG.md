@@ -7,7 +7,10 @@ Work in progress goes under **Unreleased** and moves into a version heading at r
 ## [Unreleased]
 
 ### Removed
-- Remove unused Python code: `riffle.analysis.legality.playset_eligible` and its `BUILT_FORMATS` tuple (a rule for when to buy four copies of a card, which only its own test called; this change also takes it out of DESIGN's milestone 3), `riffle.analysis.pricing.DeckPrice.unpriced`, `riffle.models.card.Printing.is_old_border`, `riffle.models.deck.BOARDS`, `riffle.ingest.local.decklist.load`, `riffle.ingest.local.manabox.stamp`, `riffle.ingest.remote.pricelists.STORES`, and `riffle.ops.schedule.jobs.Status.program`, with the `program` key that `riffle.ops.schedule.launchd.parse_print` read to fill it. Remove the re-exports of the `riffle.ingest.mtgo` package, where each name stays in `riffle.ingest.mtgo.pages`, `riffle.ingest.mtgo.storage`, `riffle.ingest.mtgo.trickle`, or `riffle.models.metagame`, and the re-exports `riffle.ops.schedule.WATCH_EVERY` and `riffle.ops.schedule.Runner`, which stay in `riffle.ops.schedule.jobs`. Remove four parameters no caller passed: `dest` of `riffle.ingest.remote.scryfall.fetch_sets`, `bulk` of `riffle.ingest.remote.scryfall.snapshot_prices`, and `read` of `riffle.ops.status.job_logs` and `riffle.ops.status.jobs_lines`. None had a caller in the application or the checked external scripts. The test of `playset_eligible` goes with it; the test that `load` reads a list saved on Windows now reads the same file through `riffle.vault.from_file`. Command names and behavior stay the same.
+- Remove files that do not belong in the code repository. `DESIGN.md`, the design note, is gone: the design is kept outside the code repository, and the README, the package docstring, and the table models' docstring no longer point to the file. `CONTRIBUTING.md` takes from it what a contributor needs: where to start reading the code, the three import rules that `tests/repo/test_layout.py` keeps and two that no test checks, and where a test goes under `tests/`. `MIGRATION.md`, the table of where the original scripts went, is gone too: it named module paths that have since moved and a color table that has since been removed, and the scripts stay at tag `v0.1.0`. `.gitignore` loses the lines for DuckDB and Parquet files, the `data/` and `.obsidian/` folders, and `*.egg-info/`, which no Riffle command or build writes; `out/`, where `riffle export --out` may be pointed, stays. The logo's generator and the drawings no page links move from `docs/art/` to `scripts/art/`, so riffletcg.gg no longer serves them. In the README, the example decks are now `krenko-goblins` and `amulet-titan`, and the notes on running the tests and on the git hooks move to `CONTRIBUTING.md`, which the README points to. Command names and behavior stay the same.
+
+### Removed
+- Remove unused Python code: `riffle.analysis.legality.playset_eligible` and its `BUILT_FORMATS` tuple (a rule for when to buy four copies of a card, which only its own test called), `riffle.analysis.pricing.DeckPrice.unpriced`, `riffle.models.card.Printing.is_old_border`, `riffle.models.deck.BOARDS`, `riffle.ingest.local.decklist.load`, `riffle.ingest.local.manabox.stamp`, `riffle.ingest.remote.pricelists.STORES`, and `riffle.ops.schedule.jobs.Status.program`, with the `program` key that `riffle.ops.schedule.launchd.parse_print` read to fill it. Remove the re-exports of the `riffle.ingest.mtgo` package, where each name stays in `riffle.ingest.mtgo.pages`, `riffle.ingest.mtgo.storage`, `riffle.ingest.mtgo.trickle`, or `riffle.models.metagame`, and the re-exports `riffle.ops.schedule.WATCH_EVERY` and `riffle.ops.schedule.Runner`, which stay in `riffle.ops.schedule.jobs`. Remove four parameters no caller passed: `dest` of `riffle.ingest.remote.scryfall.fetch_sets`, `bulk` of `riffle.ingest.remote.scryfall.snapshot_prices`, and `read` of `riffle.ops.status.job_logs` and `riffle.ops.status.jobs_lines`. None had a caller in the application or the checked external scripts. The test of `playset_eligible` goes with it; the test that `load` reads a list saved on Windows now reads the same file through `riffle.vault.from_file`. Command names and behavior stay the same.
 
 ### Fixed
 - The card catalog loads again when a source gives one set's code to another in the same update. Scryfall's set list of 2026-11-17 renamed Black Lotus Unknown Planechase from `punk` to `ounk` and gave `punk` to Prismatic Pride, and every catalog load after it failed with `duplicate key value violates unique constraint "uq_sets_game_id_code"`, leaving the catalog at that day. Set codes are now held one live set per code within a game and checked at commit, as printings' collector numbers are, so codes can move or swap within one load and a retired set gives its code up. Finding printings by set code and number now looks only at live sets. Run `riffle db upgrade` to apply migration 0003.
@@ -16,7 +19,7 @@ Work in progress goes under **Unreleased** and moves into a version heading at r
 - Share the tests' repeated setup through `conftest.py` fixtures and helpers. Four price-source test files each had their own fake source; the command runner, the launchctl stand-in, a job's log, a kept Card Kingdom list, and the sync's network and step fakes were written again in each file or imported from one test file into another; and about a hundred lines set `HOME` and the XDG folders by hand, though every test already gets its own. Now there is one fake source, one `invoke` runner, one set of scheduler and sync fakes, and fixtures for the data folder, the vault's deck folder, a one-deck vault, a kept price day, a config folder with no config in it yet, and a home with its config and data under `~/.config` and `~/.local/share`. No test module imports from another. No test is added, removed, or renamed, and none changes what it checks.
 
 ### Changed
-- Clarify sync and collection-pickup docstrings and local names, and add a DESIGN walkthrough from the command to source collection, note generation, and backup. Document file writes, offline fallback, failure handling, and watch mode. Command behavior stays the same.
+- Clarify sync and collection-pickup docstrings and local names. The docstrings now document file writes, offline fallback, and failure handling. Command behavior stays the same.
 
 ### Removed
 - Remove unused Python helpers `riffle.analysis.colors.archetype_name` and its `COLOR_ARCHETYPES` table, `riffle.analysis.legality.target_copies`, `riffle.net.get_text`, `riffle.ingest.remote.scryfall.is_current`, and `riffle.ingest.remote.tcgcsv.stored_days`. They had no callers in the application or the checked external scripts. Command names and behavior stay the same.
@@ -90,7 +93,7 @@ Work in progress goes under **Unreleased** and moves into a version heading at r
   them. riffletcg.gg shows the logo and name at the top and a large drawing of the shuffle under it; the
   browser tab shows the favicon (`favicon.svg`, with `favicon.ico` for older browsers and
   `apple-touch-icon.png` for a phone's home screen); a shared link shows a 1200 by 630 card (`og.png`).
-  The README opens with the banner. Every file is drawn by `docs/art/draw.py`, with the lettering as
+  The README opens with the banner. Every file is drawn by `scripts/art/draw.py`, with the lettering as
   outlines from Inter (SIL Open Font License) so it looks the same on every computer.
 - Misread printings corrected by their art. ManaBox's scanner matches a card by its art and often records a
   precon's card under an earlier printing of the reprint (most of the Foundations Commander boxes' cards went
@@ -362,12 +365,11 @@ Work in progress goes under **Unreleased** and moves into a version heading at r
   square. A phone's home screen shows them on white, since a phone fills a transparent icon with
   black.
 - The README's setup works for anyone: it names what you need (Python 3.12 or newer, uv, git, and
-  Docker), downloads the code first, and no longer assumes the author's own folders; nor does
-  `DESIGN.md`.
+  Docker), downloads the code first, and no longer assumes the author's own folders.
 - The picture a shared link to riffletcg.gg shows is `link-preview.png`, named for what it is (it was
   `og.png`, after the Open Graph tag that names it), drawn at twice the size the apps ask for, 2400 by
   1260, so it stays sharp on high-resolution screens, with the logo and name inside the square some
-  apps crop from its middle. `docs/art/github-preview.png`, 2560 by 1280, is the same picture at the
+  apps crop from its middle. `scripts/art/github-preview.png`, 2560 by 1280, is the same picture at the
   2:1 shape GitHub uses for a repository's preview, to upload in the repository's settings.
 - The README and riffletcg.gg open with the logo and name centered, larger, and linked to the site,
   as Gymnasium's README does, and then "Riffle is a free, open-source tool for trading card game data

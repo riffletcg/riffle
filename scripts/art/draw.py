@@ -1,4 +1,5 @@
-"""Draw Riffle's logo, favicon, wordmark and link previews into docs/.
+"""Draw Riffle's logo, favicon, wordmark and link previews into docs/, and into this folder the
+drawings no page links.
 
 Every file comes from one drawing of the mark: nested arches, each made of a left half (one packet
 of cards) and a right half (the other packet). At the top of each arch one half runs past the middle
@@ -15,12 +16,12 @@ interleaving without them.
 Run it from the repository root with the folder of Inter's static fonts (https://github.com/rsms/inter,
 SIL Open Font License). It writes the SVGs, then the files that have to be pictures rather than
 drawings, with resvg and Pillow: the preview a shared link shows (link-preview.png) and the one GitHub
-shows for the repository (art/github-preview.png), each at twice the size asked for so they stay sharp
-on high-resolution screens; the favicon for older browsers (favicon.ico); and the icon a phone shows on
-its home screen (apple-touch-icon.png).
+shows for the repository (scripts/art/github-preview.png), each at twice the size asked for so they
+stay sharp on high-resolution screens; the favicon for older browsers (favicon.ico); and the icon a
+phone shows on its home screen (apple-touch-icon.png).
 
     uv run --with fonttools --with uharfbuzz --with resvg-py --with pillow \
-        python docs/art/draw.py ~/Downloads/inter/extras/ttf
+        python scripts/art/draw.py ~/Downloads/inter/extras/ttf
 """
 
 import io
@@ -36,7 +37,10 @@ from fontTools.ttLib import TTFont
 from PIL import Image
 
 PURPLE, ORANGE, INK, PAPER = "#A855F7", "#F97316", "#3B0764", "#FBFAF8"
-DOCS = Path(__file__).resolve().parent.parent
+# The drawings no page links stay beside this script, out of the folder the site serves.
+ART = Path(__file__).resolve().parent
+ROOT = ART.parents[1]
+DOCS = ROOT / "docs"
 # Light lettering when the page around the image is dark.
 DARK = "<style>.ink{fill:#3B0764}@media (prefers-color-scheme:dark){.ink{fill:#EDE9F5}}</style>"
 
@@ -164,11 +168,11 @@ def preview(bold: Lettering, width: int, height: int, what: str) -> str:
 def main(fonts: Path) -> None:
     bold = Lettering(fonts / "Inter-Bold.ttf")
     files = {
-        "logo.svg": svg(
+        DOCS / "logo.svg": svg(
             120, 120, mark(), "Riffle", "The Riffle logo: purple and orange arches interleaving at the top."
         ),
-        "favicon.svg": svg(120, 120, tab_icon(), "Riffle", "The Riffle logo, for the browser tab."),
-        "art/touch-icon.svg": svg(
+        DOCS / "favicon.svg": svg(120, 120, tab_icon(), "Riffle", "The Riffle logo, for the browser tab."),
+        ART / "touch-icon.svg": svg(
             180,
             180,
             # White, not transparent: a phone fills a transparent icon with black.
@@ -178,12 +182,12 @@ def main(fonts: Path) -> None:
             "Riffle",
             "The Riffle logo on white, for a phone's home screen.",
         ),
-        "art/link-preview.svg": preview(bold, 1200, 630, "for link previews"),
-        "art/github-preview.svg": preview(bold, 1280, 640, "for GitHub's preview of the repository"),
+        ART / "link-preview.svg": preview(bold, 1200, 630, "for link previews"),
+        ART / "github-preview.svg": preview(bold, 1280, 640, "for GitHub's preview of the repository"),
     }
     # The wordmark's box leaves about 8 pixels around the ink on every side, so it centres evenly.
     name, right = lockup(bold)
-    files["wordmark.svg"] = svg(
+    files[DOCS / "wordmark.svg"] = svg(
         right - 70 + 8,
         87,
         DARK + name,
@@ -192,24 +196,24 @@ def main(fonts: Path) -> None:
         box=f"70 100 {number(right - 70 + 8)} 87",
     )
     for path, text in files.items():
-        (DOCS / path).write_text(text, encoding="utf-8")
-        print(f"wrote docs/{path} ({len(text.encode()):,} bytes)", flush=True)
+        path.write_text(text, encoding="utf-8")
+        print(f"wrote {path.relative_to(ROOT)} ({len(text.encode()):,} bytes)", flush=True)
     # Each preview at twice the size the apps and GitHub ask for, so it stays sharp on high-resolution
     # screens. GitHub takes a file of at most 1 MB; these flat colors come to far less.
-    picture("art/link-preview.svg", 2400, 1260).convert("RGB").save(DOCS / "link-preview.png", optimize=True)
-    picture("art/github-preview.svg", 2560, 1280).convert("RGB").save(
-        DOCS / "art/github-preview.png", optimize=True
-    )
-    picture("art/touch-icon.svg", 180, 180).convert("RGB").save(DOCS / "apple-touch-icon.png", optimize=True)
+    link, github = DOCS / "link-preview.png", ART / "github-preview.png"
+    touch, ico = DOCS / "apple-touch-icon.png", DOCS / "favicon.ico"
+    picture(ART / "link-preview.svg", 2400, 1260).convert("RGB").save(link, optimize=True)
+    picture(ART / "github-preview.svg", 2560, 1280).convert("RGB").save(github, optimize=True)
+    picture(ART / "touch-icon.svg", 180, 180).convert("RGB").save(touch, optimize=True)
     # One file holding the favicon at 16, 32 and 48 pixels, for browsers that don't read favicon.svg.
-    picture("favicon.svg", 256, 256).save(DOCS / "favicon.ico", sizes=[(16, 16), (32, 32), (48, 48)])
-    for out in ("link-preview.png", "art/github-preview.png", "apple-touch-icon.png", "favicon.ico"):
-        print(f"wrote docs/{out} ({(DOCS / out).stat().st_size:,} bytes)", flush=True)
+    picture(DOCS / "favicon.svg", 256, 256).save(ico, sizes=[(16, 16), (32, 32), (48, 48)])
+    for out in (link, github, touch, ico):
+        print(f"wrote {out.relative_to(ROOT)} ({out.stat().st_size:,} bytes)", flush=True)
 
 
-def picture(source: str, width: int, height: int) -> Image.Image:
-    """An SVG in docs/ drawn as a picture of the given size, its transparent parts kept."""
-    png = resvg_py.svg_to_bytes(svg_path=str(DOCS / source), width=width, height=height)
+def picture(source: Path, width: int, height: int) -> Image.Image:
+    """An SVG drawn as a picture of the given size, its transparent parts kept."""
+    png = resvg_py.svg_to_bytes(svg_path=str(source), width=width, height=height)
     return Image.open(io.BytesIO(bytes(png)))
 
 

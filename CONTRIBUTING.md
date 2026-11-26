@@ -46,8 +46,10 @@ unset pw
 riffle db up && riffle db upgrade
 ```
 
-Without Postgres the database tests skip, and the 90% coverage floor below then fails. The
-devcontainer ([GitHub Codespaces](README.md#github-codespaces)) has both.
+Every test runs with its own config and data folders and an unreachable database URL, so none can touch
+real data. Tests marked `postgres` use a separate `tcg_test` database, recreated on every run; without
+Postgres they skip, and the 90% coverage floor below then fails. The devcontainer
+([GitHub Codespaces](README.md#github-codespaces)) has both.
 
 Every change goes on its own branch and needs:
 
@@ -59,7 +61,38 @@ Every change goes on its own branch and needs:
 uv sync --locked && uv run pytest --cov-fail-under=90 && uv run ruff check src tests && uv run ruff format --check src tests && uv run mypy src
 ```
 
+Every `uv run pytest` also measures line and branch coverage and lists the files with untested code.
+CI's Linux jobs, which run every test against Postgres, fail below 90%; `--no-cov` skips the
+measurement.
+
+Git hooks run the same checks before your commits and pushes. Turn them on once per clone:
+
+```bash
+git config core.hooksPath .githooks
+```
+
+`pre-commit` runs ruff's lint and format checks; `pre-push` runs everything CI does, with the 90%
+floor, and needs Postgres up (`riffle db up`).
+
 A database change is a hand-written, numbered migration in `src/riffle/db/migrations/versions/`, with
 the tables in `src/riffle/db/models.py` kept in step. A commit message has a title in the imperative
 ("Add …", "Fix …"), then plain prose wrapped at 72 columns: what was wrong, and what changes.
-[DESIGN.md](DESIGN.md) explains how Riffle is put together.
+
+The code is in `src/riffle/`, and the paths below are inside it unless they begin with `tests/`. Start
+with a command in `cli/`, then follow its calls into operations (`ops/`), analysis, ingestion, or the
+catalog (`store/`). `ops/sync.py` coordinates a full sync; `sync.py`, at the package's root, handles
+deck analysis and generated notes against the catalog protocol. `tests/repo/test_layout.py` keeps three
+rules about what imports what:
+
+- `ops/sync.py` reports results through a small output protocol and progress steps, without importing
+  the CLI or Typer.
+- Metagame analysis imports `Event` and `MtgoDeck` from `models/metagame.py`, so it loads no ingestion
+  or database code.
+- Scheduler dispatch selects a backend; both backends depend on `ops/schedule/jobs.py`, and import
+  neither the dispatch nor each other.
+
+Two more hold, though no test checks them: `models/` has no database imports, and
+`ops/schedule/jobs.py` never imports the backends.
+
+A test goes under `tests/` in the folder named for the code it tests (`tests/cli/`, `tests/ingest/`,
+`tests/ops/`); `tests/repo/` checks docs and repository policy.

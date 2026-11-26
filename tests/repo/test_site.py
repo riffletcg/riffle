@@ -64,7 +64,7 @@ def test_the_link_previews_are_the_sizes_they_say():
     height = int(re.findall(r'<meta property="og:image:height" content="(\d+)">', page)[0])
     assert png_size(DOCS / "link-preview.png") == (width, height)
     # GitHub fits a repository's preview to 2:1 and takes a file of at most 1 MB.
-    github = DOCS / "art" / "github-preview.png"
+    github = ROOT / "scripts" / "art" / "github-preview.png"
     across, down = png_size(github)
     assert across == 2 * down and github.stat().st_size < 1_000_000
 
