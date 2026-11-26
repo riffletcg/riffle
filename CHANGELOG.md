@@ -6,6 +6,9 @@ Work in progress goes under **Unreleased** and moves into a version heading at r
 
 ## [Unreleased]
 
+### Fixed
+- The card catalog loads again when a source gives one set's code to another in the same update. Scryfall's set list of 2026-11-17 renamed Black Lotus Unknown Planechase from `punk` to `ounk` and gave `punk` to Prismatic Pride, and every catalog load after it failed with `duplicate key value violates unique constraint "uq_sets_game_id_code"`, leaving the catalog at that day. Set codes are now held one live set per code within a game and checked at commit, as printings' collector numbers are, so codes can move or swap within one load and a retired set gives its code up. Finding printings by set code and number now looks only at live sets. Run `riffle db upgrade` to apply migration 0003.
+
 ### Changed
 - Share the tests' repeated setup through `conftest.py` fixtures and helpers. Four price-source test files each had their own fake source; the command runner, the launchctl stand-in, a job's log, a kept Card Kingdom list, and the sync's network and step fakes were written again in each file or imported from one test file into another; and about a hundred lines set `HOME` and the XDG folders by hand, though every test already gets its own. Now there is one fake source, one `invoke` runner, one set of scheduler and sync fakes, and fixtures for the data folder, the vault's deck folder, a one-deck vault, a kept price day, a config folder with no config in it yet, and a home with its config and data under `~/.config` and `~/.local/share`. No test module imports from another. No test is added, removed, or renamed, and none changes what it checks.
 

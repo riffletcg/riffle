@@ -6,7 +6,7 @@ from datetime import UTC, datetime
 from decimal import Decimal
 
 import pytest
-from sqlalchemy import insert, select, text
+from sqlalchemy import insert, select, text, update
 from sqlalchemy.exc import IntegrityError
 
 from riffle.db import catalog, ids
@@ -313,6 +313,62 @@ def test_other_games_may_share_numbers(pg):
                 collector_number="WTR167",
             )
         )
+    check_now(pg)
+
+
+# ---- set codes: one live set per game and code ----------------------------------------------
+
+
+def codes(pg):
+    return dict(pg.execute(select(Set.set_id, Set.code)).all())
+
+
+def test_a_new_set_may_take_a_code_before_the_old_set_gives_it_up(pg):
+    """Scryfall renamed a set's code and gave the old one to a new set in the same list. The
+    merge writes both rows in one statement, in whatever order Postgres picks; here the new set
+    arrives first, the order a row-by-row check refuses."""
+    load(pg)
+    pg.execute(insert(Set).values(set_id=set_id("s-new"), game_id="mtg", code="cor", name="New Core"))
+    pg.execute(update(Set).where(Set.set_id == set_id("s-core")).values(code="ocor"))
+    check_now(pg)
+    assert codes(pg)[set_id("s-core")] == "ocor"
+    assert codes(pg)[set_id("s-new")] == "cor"
+
+
+def test_two_sets_may_swap_codes_in_one_load(pg):
+    load(pg)
+    b = batch()
+    b.sets[0].code, b.sets[1].code = "pcor", "cor"
+    load(pg, b)
+    check_now(pg)
+    assert codes(pg)[set_id("s-core")] == "pcor"
+    assert codes(pg)[set_id("s-promo")] == "cor"
+
+
+def test_a_retired_set_frees_its_code(pg):
+    load(pg)
+    b = batch()
+    b.sets = [s for s in b.sets if s.ref != "s-promo"]
+    b.printings = [p for p in b.printings if p.ref != "p-ring-promo"]
+    b.sets.append(SetRow("s-new", "pcor", "New Promos", "promo"))
+    load(pg, b)
+    check_now(pg)
+    assert retired(pg, Set, Set.set_id, set_id("s-promo"))
+    assert codes(pg)[set_id("s-promo")] == "pcor"
+    assert codes(pg)[set_id("s-new")] == "pcor"
+
+
+def test_two_listed_sets_cannot_share_a_code(pg):
+    b = batch()
+    b.sets.append(SetRow("s-new", "cor", "New Core", "core"))
+    load(pg, b)
+    with pytest.raises(IntegrityError, match="ex_sets_game_id_code"):
+        check_now(pg)
+
+
+def test_other_games_may_share_a_set_code(pg):
+    load(pg)
+    pg.execute(insert(Set).values(set_id=uuid.uuid4(), game_id="fab", code="cor", name="Not Magic"))
     check_now(pg)
 
 

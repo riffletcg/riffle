@@ -325,6 +325,16 @@ def test_retired_rows_are_left_out(pg):
     assert cat.resolve("Fire // Ice") is None and cat.rules([cid("o-fire")]) == {}
 
 
+def test_printings_at_a_set_code_a_retired_set_also_holds(pg):
+    load(pg, [card("old-1", "o-old", "Old Card", set="pun", set_id="set-pun-old", collector_number="1")])
+    cat = load(
+        pg, [card("new-1", "o-new", "New Card", set="pun", set_id="set-pun-new", collector_number="1")]
+    )
+    assert {place: p.scryfall_id for place, p in cat.printings_at([("PUN", "1")]).items()} == {
+        ("PUN", "1"): "new-1"
+    }
+
+
 # ---- opening the catalog -----------------------------------------------------------------
 
 
