@@ -6,7 +6,7 @@ would have raised at most one alarm on its own gaps over the last year. A clock-
 1.25; a list whose gaps now and then run past its month's longest learns a wider one. Nothing is
 judged until a list has 14 gaps.
 
-Why these numbers (the vault's price-watch-numbers note has the proof and the charts):
+Why these numbers:
 
 - 1.25: GoatBots' 1,363 gaps over 3.7 years. Its normal gaps beat the longest of the 30 days
   before them by at most 1.0035 times; its two late publishes by 1.2506 and 1.9926 times. Any

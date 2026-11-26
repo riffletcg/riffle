@@ -59,7 +59,7 @@ the file kept, which riffle.ops.checks checks.
 
 One run at a time a store: a run that finds the store's lock held asks nothing. A list with no
 rows ({"data": null} or []) keeps nothing and is asked for again next run
-(riffle.ingest.empties). A list with no readable stamp, or one that doesn't read back as
+(riffle.ingest.remote._empties). A list with no readable stamp, or one that doesn't read back as
 written, is set aside, named by when it was fetched, and its step fails so someone looks:
 
     <data_dir>/<store>/aside/<list>-<UTC time>.json.gz

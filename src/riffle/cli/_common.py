@@ -17,6 +17,9 @@ from riffle.models import Deck
 from riffle.progress import LogTracker, Tracker, Watched, elapsed, open_tracker
 from riffle.store import Catalog
 
+# The shell runs `riffle` itself on every Tab press and offers what these return. When
+# nothing matches, Typer's zsh script falls back to file names, so a path still completes.
+
 
 def _offer(values: Iterable[str], incomplete: str) -> list[str]:
     return [v for v in values if v.startswith(incomplete)]
@@ -73,14 +76,17 @@ def _choices(*values: str) -> Callable[[str], list[str]]:
 
 DeckRef = Annotated[
     str,
-    typer.Argument(help="Deck note slug (aesi-lands) or a path to .md/.txt", autocompletion=_complete_deck),
+    typer.Argument(
+        help="Deck note slug (krenko-goblins) or a path to .md/.txt", autocompletion=_complete_deck
+    ),
 ]
 
 
 DecksRef = Annotated[
     str,
     typer.Argument(
-        help="Deck note slug (aesi-lands), a path to .md/.txt, or all", autocompletion=_complete_deck_or_all
+        help="Deck note slug (krenko-goblins), a path to .md/.txt, or all",
+        autocompletion=_complete_deck_or_all,
     ),
 ]
 

@@ -25,7 +25,7 @@ again. Only the first broken copy of a publish is set aside: a later one goes in
 once, not twice a day. Nothing kept is ever removed.
 
 The newest default-cards file is the bulk file: the card catalog in Postgres is loaded from it
-by riffle.ingest.scryfall_catalog. After each new one, one more API request fetches the set
+by riffle.ingest.remote.scryfall_catalog. After each new one, one more API request fetches the set
 list (parent sets and release dates, which card objects lack) into
 <data_dir>/scryfall/sets.json, and into scryfall/sets/<fetched>.json whenever it has changed;
 Scryfall gives it no publish time, so it's named by fetch time. scryfall/sets/checks.jsonl

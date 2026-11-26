@@ -1,4 +1,4 @@
-"""Own / buy. Milestone 1 — the thing needed twice before it existed.
+"""Own / buy: the copies a deck plays against the copies owned.
 
 Two states only. Owned means scanned into ManaBox.
 """

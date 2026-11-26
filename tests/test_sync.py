@@ -44,7 +44,7 @@ def test_sync_writes_only_machine_zones(tmp_path, cat):
 
 
 def test_notes_carry_no_date_so_a_day_later_with_the_same_prices_writes_nothing(tmp_path, cat):
-    """S1: each note said `generated: <today>`, so every sync of a new day rewrote all of them."""
+    """Each note said `generated: <today>`, so every sync of a new day rewrote all of them."""
     mtg = _vault(tmp_path)
     inv = sync.Inventory([])
     assert sync.run(mtg, inv, cat, today="2026-09-21").changed_notes == 2
@@ -57,7 +57,7 @@ def test_notes_carry_no_date_so_a_day_later_with_the_same_prices_writes_nothing(
 
 
 def test_the_old_price_log_is_closed_once_and_never_appended_to(tmp_path, cat):
-    """S2: the price log grew by a line a buy card a day; `riffle prices log` reads the store instead."""
+    """The price log grew by a line a buy card a day; `riffle prices log` reads the store instead."""
     mtg = _vault(tmp_path)
     log = mtg / "_log" / "prices.md"
     log.parent.mkdir(parents=True)
@@ -80,7 +80,7 @@ def test_a_vault_without_a_price_log_gets_none(tmp_path, cat):
 
 
 def test_the_state_is_saved_once_however_many_decks_changed(tmp_path, cat, monkeypatch):
-    """S3: it was saved after each deck whose list changed, up to 3.6 MB each time."""
+    """It was saved after each deck whose list changed, up to 3.6 MB each time."""
     from riffle.export import obsidian
 
     mtg = _vault(tmp_path)
@@ -240,7 +240,7 @@ def test_a_note_is_written_whole_or_not_at_all(tmp_path):
 
 
 def test_a_note_that_went_missing_is_written_again_though_nothing_changed(tmp_path, cat):
-    """C52: a sync service can turn a note into a conflict copy and drop the original. The next
+    """A sync service can turn a note into a conflict copy and drop the original. The next
     sync removes the copy and writes the note again, whether or not its deck changed."""
     mtg = _vault(tmp_path)
     sync.run(mtg, sync.Inventory([]), cat, today="2026-09-21")

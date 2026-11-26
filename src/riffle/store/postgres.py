@@ -60,7 +60,7 @@ PRINTING_COUNTS = text("""
 # A paper printing that can be played: not gold- or silver-bordered (World Championship decks,
 # Un-sets), not from a memorabilia set (Collectors' Edition, 30th Anniversary, art series), not
 # oversized. Those cost a fraction of a real copy: the 1999 World Championship Ancient Tomb was
-# $56.21 against $123.01 for the cheapest that can be played (C48).
+# $56.21 against $123.01 for the cheapest that can be played.
 _PLAYABLE = """
     NOT mp.digital
     AND coalesce(mp.border_color, '') NOT IN ('gold', 'silver')

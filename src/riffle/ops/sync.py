@@ -168,7 +168,7 @@ def _picture(url: str, dest: Path) -> int | None:
     return net.download(url, dest, accept="image/*", timeout=30)
 
 
-NETWORK_WAIT = 120.0
+NETWORK_WAIT = 120.0  # seconds a sync waits for the network before carrying on offline
 
 
 def _hosts() -> list[str]:

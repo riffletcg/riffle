@@ -41,7 +41,7 @@ warns until it's given a rule; it warns too for a kept file the manifest no long
 
 AllPrices is kept as returned, checked against its .sha256 and to decompress whole, and named
 by the date inside, by the sync (snapshot): on the first run, and again when a day in its
-window has no prices kept (the Mac was off that day), at most once every REFILL days, so a
+window has no prices kept (the machine was off that day), at most once every REFILL days, so a
 missed day is still inside the next file's window with two months to spare. A day MTGJSON
 never built can't come back that way; a kept AllPrices counts as covering its whole window.
 Nothing here reads the files back: the price loader does. Headers, retries, and 429 handling:

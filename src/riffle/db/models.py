@@ -1,5 +1,5 @@
 """ORM models: the schema's definition. Migrations must build exactly this;
-tests/test_postgres.py compares the two on every run. Alembic compares every
+tests/db/test_postgres.py compares the two on every run. Alembic compares every
 table, column, key, and index, but not exclusion constraints, so the one on
 printings is checked by a test of its behavior instead.
 

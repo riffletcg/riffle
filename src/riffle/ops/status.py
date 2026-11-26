@@ -9,12 +9,12 @@ nothing kept, between days that had some, is ✗: a gap. A day with none after t
 the days before its first are blank.
 
 Shape carries every meaning and color only repeats it, in the progress bars' purple: one color
-for one kind of thing, as the vault's charts have it, so a strip reads in a log, without color,
-and for every kind of color vision. Under the strips: the MTGO backlog by month; the scheduled
-jobs, and what their logs say (riffle.ops.joblogs): the sync failing run after run, the steps that
-failed in the last 24 hours, the days a job started too few runs; the store's size, the disk's
-free space and the days it leaves; and the newest backup, from the backup job's log when the
-config names one (backup_log), else whether Time Machine has a destination.
+for one kind of thing, so a strip reads in a log, without color, and for every kind of color
+vision. Under the strips: the MTGO backlog by month; the scheduled jobs, and what their logs say
+(riffle.ops.joblogs): the sync failing run after run, the steps that failed in the last 24
+hours, the days a job started too few runs; the store's size, the disk's free space and the
+days it leaves; and the newest backup, from the backup job's log when the config names one
+(backup_log), else whether Time Machine has a destination.
 """
 
 import math
@@ -202,7 +202,7 @@ def short_runs(
 ) -> list[str]:
     """Each whole day on which jobs run every few minutes started too few runs (riffle.ops.joblogs):
     how many of them did, and the one that started the fewest against what it owed. Most at once
-    is the Mac asleep; one alone, its runs taking longer than its interval."""
+    is the machine asleep; one alone, its runs taking longer than its interval."""
     every = [job for job in logs if job.interval]
     short: dict[str, list[tuple[float, str, int, int]]] = {}
     for job in every:
@@ -299,7 +299,7 @@ def store_line(
     now: Callable[[], datetime] = lambda: times.now(),
 ) -> str:
     """The store's size, the free space on its disk, and the days that leaves at this week's
-    rate (riffle.ops.disk): the disk's rate, not the store's, since anything on the Mac fills it."""
+    rate (riffle.ops.disk): the disk's rate, not the store's, since anything on the machine fills it."""
     if not root.exists():
         return f"nothing kept yet in {root}"
     try:

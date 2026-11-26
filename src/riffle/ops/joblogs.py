@@ -3,13 +3,13 @@ that failed, and how many runs each job started a day.
 
 Each run writes a header (progress.LogTracker.header), `2026-10-19 01:26:10 UTC  riffle watch
 manapool`; a line a step, `01:35:40  ! Mana Pool singles: …` for one that failed, its time UTC
-and its date the header's; and since 0069 a closing line, `01:35:46  exited 1 after 9m 36s`. A
-run without one was cut off, is still running, or ran before 0069: how it ended isn't known.
+and its date the header's; and since 2026-10-23 a closing line, `01:35:46  exited 1 after 9m 36s`.
+A run without one was cut off, is still running, or ran before then: how it ended isn't known.
 A line with no time (a summary, the error a run exits on, a traceback) belongs to the run above
-it. Headers written before 2026-09-29 have no zone: they're the Mac's time.
+it. Headers written before 2026-09-29 have no zone: they're this machine's time.
 
 A line's date is its header's, carried past each midnight: a line more than twelve hours earlier
-than the one above it is the next day's. A run the Mac froze asleep for days goes on writing
+than the one above it is the next day's. A run the machine froze asleep for days goes on writing
 after it wakes, and its lines are dated as if no day had passed: only a date on every line would
 tell, and its failure still shows, since the run's exit says it.
 """

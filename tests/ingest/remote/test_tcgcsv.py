@@ -822,7 +822,7 @@ def test_a_learned_day_is_asked_from_its_expected_time(data_dir, sleeps, tracker
     assert watch(fetch, at=expected + timedelta(minutes=1)).asked
 
 
-# ---- each set's products (0045) ----------------------------------------------------
+# ---- each set's products, since 2026-10-03 -----------------------------------------
 
 ON = "2026-09-20T10:00:00.5"  # a set's modifiedOn: TCGplayer's time, no zone
 LATER = datetime(2026, 9, 25, 22, 0, tzinfo=UTC)  # the next day's run

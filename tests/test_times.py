@@ -1,4 +1,4 @@
-"""Times: kept in UTC, shown on a terminal in the Mac's time with the zone."""
+"""Times: kept in UTC, shown on a terminal in this machine's time with the zone."""
 
 from datetime import UTC, date, datetime
 

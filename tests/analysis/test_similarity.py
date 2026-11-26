@@ -1,4 +1,4 @@
-"""riffle.analysis.similarity: a zone's counts, Definition 2's measures, the propositions on data,
+"""riffle.analysis.similarity: a zone's counts, the measures, their properties on random data,
 and the verdict."""
 
 import random
@@ -12,7 +12,7 @@ from riffle.ingest.local.decklist import parse_text
 from tests.conftest import CARDS
 
 EXTRA = {
-    # the plan's fixture cards conftest lacks: an accent, a dot, a basic and a snow basic
+    # the fixture cards conftest lacks: an accent, a dot, a basic and a snow basic
     "x-jotun": ("Jötun Grunt", "normal", 0.5, None),
     "x-cerberus": ("Summon G.F. Cerberus", "normal", 0.5, None),
     "x-mountain": ("Mountain", "normal", 0.1, 0.01),
@@ -22,7 +22,7 @@ EXTRA = {
 
 @pytest.fixture
 def cards(monkeypatch):
-    """conftest's catalog resolves the plan's fixture cards too, for one test."""
+    """conftest's catalog resolves these fixture cards too, for one test."""
     for oid, card in EXTRA.items():
         monkeypatch.setitem(CARDS, oid, card)
 
@@ -57,7 +57,7 @@ def multisets(seed, n, cards=6, most=3):
     return out
 
 
-# Lists, zones and cards: a card is its catalog card when its name resolves, else its own element as written
+# Lists, zones and cards: a card is its catalog card when its name resolves, else its name as written
 def test_counts_name_each_card_as_the_catalog_does_and_the_rest_as_written(cat, cards):
     d = deck("4 lightning bolt\n2 Summon G.F. Cerberus\n1 Jötun Grunt\n1 Sol Rnig\n")
     assert similarity.counts(d, cat) == Counter(
@@ -76,7 +76,7 @@ def test_counts_leave_basic_lands_out_plain_and_snow_covered(cat, cards):
     assert similarity.counts(d, cat, zone="sideboard") == Counter({"Fire // Ice": 1})
 
 
-# a double-faced card written by its front face and by its whole name is one element of C
+# a double-faced card written by its front face and by its whole name is one card
 def test_counts_a_double_faced_card_by_its_front_face_and_whole_name_as_one(cat):
     d = deck("2 Delver of Secrets\n1 Delver of Secrets // Insectile Aberration\n1 Fire\n1 Fire // Ice\n")
     assert similarity.counts(d, cat) == Counter(
@@ -95,7 +95,7 @@ def test_counts_read_one_board_so_the_commander_and_companion_stay_out(cat):
     assert similarity.counts(d, cat, zone="commander") == Counter({"Aesi, Tyrant of Gyre Strait": 1})
 
 
-# Definition 2 on two singletons that differ: nothing shared, a copy only in each, one swap, every share 0
+# the measures on two singletons that differ: nothing shared, a copy only in each, one swap, every share 0
 def test_two_singletons_that_differ():
     r = similarity.compare(Counter({"Sol Ring": 1}), Counter({"Mana Crypt": 1}))
     assert (r.shared, r.only_a, r.only_b, r.swaps) == (0, 1, 1, 1)
@@ -103,7 +103,7 @@ def test_two_singletons_that_differ():
     assert (r.only_a_cards, r.only_b_cards) == (Counter({"Sol Ring": 1}), Counter({"Mana Crypt": 1}))
 
 
-# Definition 2 on two singleton lists that are the same: one shared copy, no swaps, every share 1
+# the measures on two singleton lists that are the same: one shared copy, no swaps, every share 1
 def test_two_singletons_that_are_the_same():
     r = similarity.compare(Counter({"Sol Ring": 1}), Counter({"Sol Ring": 1}))
     assert (r.shared, r.only_a, r.only_b, r.swaps) == (1, 0, 0, 0)
@@ -111,7 +111,8 @@ def test_two_singletons_that_are_the_same():
     assert r.only_a_cards == r.only_b_cards == Counter()
 
 
-# counts: a 4-of against a 2-of shares two copies and has two only in the first, so |A| = s + o(A, B)
+# counts: a 4-of against a 2-of shares two copies and has two only in the first, so the first's
+# copies are shared + only_a
 def test_a_four_of_against_a_two_of():
     r = similarity.compare(Counter({"Lightning Bolt": 4}), Counter({"Lightning Bolt": 2}))
     assert (r.shared, r.only_a, r.only_b, r.swaps) == (2, 2, 0, 2)
@@ -119,7 +120,8 @@ def test_a_four_of_against_a_two_of():
     assert (r.only_a_cards, r.only_b_cards) == (Counter({"Lightning Bolt": 2}), Counter())
 
 
-# no Jaccard or containment for a zone that is empty in either list: J(A, 0) = 0 and κ(0, B) is 0/0
+# no Jaccard or containment for a zone that is empty in either list: Jaccard against an empty zone
+# would always be 0, and an empty zone's containment is 0/0
 def test_an_empty_zone_leaves_jaccard_and_containment_none():
     r = similarity.compare(Counter(), Counter({"Sol Ring": 2}))
     assert (r.shared, r.only_a, r.only_b, r.swaps) == (0, 0, 2, 2)
@@ -129,7 +131,9 @@ def test_an_empty_zone_leaves_jaccard_and_containment_none():
     assert (both.swaps, both.jaccard, both.a_in_b, both.b_in_a) == (0, None, None, None)
 
 
-# Definition 2: |A| = s + o(A, B), the only-in cards are (A - B)^+, J = s / |A ∨ B| and κ(A, B) = s / |A|
+# the measures on random zones: a's copies are shared + only_a, its only-in cards are a - b, swaps are
+# the larger only-in count, Jaccard is shared over shared + only_a + only_b, and a_in_b is shared
+# over a's copies
 def test_definition_2_holds_on_random_zones():
     sets = multisets(6, 200)
     for a, b in zip(sets, sets[1:], strict=False):
@@ -141,7 +145,7 @@ def test_definition_2_holds_on_random_zones():
         assert (r.a_in_b, r.b_in_a) == pytest.approx((r.shared / a.total(), r.shared / b.total()))
 
 
-# Proposition 1: swaps are a metric: zero only for equal multisets, symmetric, within the triangle inequality
+# swaps are a metric: zero only for equal multisets, symmetric, within the triangle inequality
 def test_swaps_are_a_metric_on_random_multisets():
     sets = multisets(1, 300)
     for a, b, c in zip(sets, sets[1:], sets[2:], strict=False):
@@ -151,7 +155,7 @@ def test_swaps_are_a_metric_on_random_multisets():
         assert d_s(a, a) == 0 and d_s(a, a + Counter(c0=1)) == 1
 
 
-# Proposition 2: 1 - J is a metric: zero only for equal multisets, symmetric, within the triangle inequality
+# 1 - Jaccard is a metric: zero only for equal multisets, symmetric, within the triangle inequality
 def test_jaccard_distance_is_a_metric_on_random_multisets():
     sets = multisets(2, 300)
     for a, b, c in zip(sets, sets[1:], sets[2:], strict=False):
@@ -160,7 +164,7 @@ def test_jaccard_distance_is_a_metric_on_random_multisets():
         assert d_j(a, a) == 0 and d_j(a, a + Counter(c0=1)) > 0
 
 
-# Proposition 4: A = {1} is wholly in B = {1, 2}, so its containment is 1 though A ≠ B (one swap apart)
+# containment is not a metric: A = {1} is wholly in B = {1, 2}, so it is 1 though A ≠ B (one swap apart)
 def test_containment_in_a_larger_zone_that_holds_it_is_one():
     r = similarity.compare(Counter({"c1": 1}), Counter({"c1": 1, "c2": 1}))
     assert (r.a_in_b, r.b_in_a, r.swaps) == (1.0, 0.5, 1)
@@ -170,15 +174,15 @@ def test_containment_in_a_larger_zone_that_holds_it_is_one():
         assert similarity.compare(bigger, a).b_in_a == 1.0
 
 
-# Proposition 5: the whole lists' swaps are at most the sum of the zones' swaps
+# the whole lists' swaps are at most the sum of the zones' swaps
 def test_the_whole_lists_swaps_are_at_most_the_zones_sum():
     sets = multisets(5, 400)
     for a, a2, b, b2 in zip(sets, sets[1:], sets[2:], sets[3:], strict=False):
         assert d_s(a + a2, b + b2) <= d_s(a, b) + d_s(a2, b2)
 
 
-# Proposition 5's example: 4 of x in the main deck and 4 of y in the sideboard, and the reverse, are 4 swaps
-# in each zone measured apart, and 0 on the whole lists
+# the whole lists' swaps can be fewer than the zones' sum: 4 of x in the main deck and 4 of y in the
+# sideboard, and the reverse, are 4 swaps in each zone measured apart, and 0 on the whole lists
 def test_main_and_sideboard_swapped_are_four_swaps_in_each_zone_and_none_as_a_whole(cat):
     a = deck("Deck\n4 Lightning Bolt\n1 Sol Ring\n\nSideboard\n4 Cyclonic Rift\n")
     b = deck("Deck\n4 Cyclonic Rift\n1 Sol Ring\n\nSideboard\n4 Lightning Bolt\n")
@@ -188,7 +192,7 @@ def test_main_and_sideboard_swapped_are_four_swaps_in_each_zone_and_none_as_a_wh
     assert d_s(main[0] + side[0], main[1] + side[1]) == 0
 
 
-# Where it goes: the lines as constants, for deck-variants and the vault's merge
+# The lines are constants
 def test_the_lines_are_constants():
     assert (similarity.VARIANT_SWAPS, similarity.OTHER_COMMANDER_SWAPS) == (20, 10)
 
@@ -247,8 +251,8 @@ def test_different_formats_get_no_verdict(fmt_a, fmt_b):
     assert similarity.is_variant(a, b, 0) is None
 
 
-# Fixed after review: a double-faced commander written by its front face and by its whole name is one
-# commander, through the catalog and, without one, by its front face; one Unicode form either way
+# a double-faced commander written by its front face and by its whole name is one commander, through
+# the catalog and, without one, by its front face; one Unicode form either way
 def test_a_double_faced_commander_written_either_way_is_one(cat):
     front = commander_deck(["Delver of Secrets"])
     whole = commander_deck(["Delver of Secrets // Insectile Aberration"])
@@ -262,8 +266,8 @@ def test_a_double_faced_commander_written_either_way_is_one(cat):
     assert similarity.commanders(composed) == similarity.commanders(decomposed)
 
 
-# Fixed after review: a list with no format, as a path gives one, is read as Commander when it has a
-# commander, else in the other deck's format; with neither format named, no verdict
+# a list with no format, as a path gives one, is read as Commander when it has a commander, else in
+# the other deck's format; with neither format named, no verdict
 def test_a_list_without_a_format_takes_the_other_decks():
     note = commander_deck(["Aesi, Tyrant of Gyre Strait"])
     listed = parse_text("Commander\n1 Aesi, Tyrant of Gyre Strait\n\nDeck\n1 Sol Ring\n")
@@ -277,8 +281,8 @@ def test_a_list_without_a_format_takes_the_other_decks():
     assert similarity.is_variant(plain, plain, 0) is None
 
 
-# Fixed after review: an MTGO-form list puts its commander after the blank line, where it reads as the
-# sideboard, so the verdict says it names none rather than calling it another commander
+# an MTGO-form list puts its commander after the blank line, where it reads as the sideboard, so the
+# verdict says it names none rather than calling it another commander
 def test_a_list_that_names_no_commander_gets_no_line():
     note = commander_deck(["Aesi, Tyrant of Gyre Strait"])
     mtgo = parse_text("1 Sol Ring\n\n1 Aesi, Tyrant of Gyre Strait\n", slug="aesi")
@@ -296,8 +300,8 @@ class Aliases:
         return "Spider-Man 2099"
 
 
-# Fixed after review: with a catalog, commanders are compared as the cards their names resolve to, so two
-# names for one card are one commander; without it, the names stay apart
+# with a catalog, commanders are compared as the cards their names resolve to, so two names for one
+# card are one commander; without it, the names stay apart
 def test_commanders_go_through_the_catalog_when_it_is_given():
     mtgo = commander_deck(["Uharis, the Stormspinner"])
     paper = commander_deck(["Spider-Man 2099"])
@@ -319,8 +323,8 @@ def test_wastes_are_a_basic_land(cat):
     )
 
 
-# Fixed after review: a list that names no format is read in the other deck's named one, so a Duel
-# Commander note's own list given by its path reads the Duel Commander line
+# a list that names no format is read in the other deck's named one, so a Duel Commander note's own
+# list given by its path reads the Duel Commander line
 def test_a_list_without_a_format_reads_in_a_duel_notes_format():
     note = commander_deck(["Aesi, Tyrant of Gyre Strait"], fmt="duel")
     listed = parse_text("Commander\n1 Aesi, Tyrant of Gyre Strait\n\nDeck\n1 Sol Ring\n")

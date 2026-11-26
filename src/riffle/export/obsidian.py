@@ -13,8 +13,8 @@ note and log in mtg/.data/_generated/ and mtg/.data/_log/ instead, out of Obsidi
 Every file is written whole (a temporary file renamed over it), so a sync service never
 uploads half a note.
 
-Authored notes pull generated ones in with ![[aesi-lands-data]]. No dots in
-generated names: Obsidian reads "aesi-lands.data" as a ".data" file.
+Authored notes pull generated ones in with ![[krenko-goblins-data]]. No dots in
+generated names: Obsidian reads "krenko-goblins.data" as a ".data" file.
 """
 
 import hashlib

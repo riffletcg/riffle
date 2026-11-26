@@ -76,8 +76,7 @@ def install(
     path: Path | None = None,
     job: jobs_mod.Job = jobs_mod.SYNC,
 ) -> Path:
-    """Write the plist and (re)load it, or on Linux the job's systemd units. Replaces any
-    existing job. An interval job takes no times."""
+    """Write the plist and (re)load it. Replaces any existing job. An interval job takes no times."""
     path = path or plist_path(job)
     exe = exe or Path(sys.argv[0]).resolve()
     log = jobs_mod.log_path(job)
@@ -94,8 +93,7 @@ def install(
 def remove(
     run: jobs_mod.Runner = jobs_mod._run, path: Path | None = None, job: jobs_mod.Job = jobs_mod.SYNC
 ) -> bool:
-    """Unload and delete, the plist or on Linux the job's systemd units. True if there was
-    anything to remove."""
+    """Unload and delete the plist. True if there was anything to remove."""
     path = path or plist_path(job)
     was_loaded = run(["launchctl", "bootout", f"{_domain()}/{job.label}"]).returncode == 0
     existed = path.exists()

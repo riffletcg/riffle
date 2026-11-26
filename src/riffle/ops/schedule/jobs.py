@@ -16,14 +16,14 @@ class Job:
     label: str
     args: tuple[str, ...]  # riffle's arguments
     log: str  # its output, in the data folder
-    interval: int | None = None
+    interval: int | None = None  # seconds between runs; None: at set times of day
 
 
-PREFIX = "gg.riffletcg.riffle"
+PREFIX = "gg.riffletcg.riffle"  # every job's label starts with it: riffletcg.gg, reversed
 SYNC = Job(f"{PREFIX}-sync", ("sync",), "sync.log")
 TRICKLE = Job(f"{PREFIX}-mtgo", ("mtgo", "trickle"), "mtgo-trickle.log", interval=600)
 LABEL = SYNC.label
-WATCH_EVERY = int(cadence.EVERY.total_seconds())
+WATCH_EVERY = int(cadence.EVERY.total_seconds())  # a Mana Pool list lasts about 30 minutes: six tries
 _TIME = re.compile(r"^(\d{1,2}):(\d{2})$")
 
 Runner = Callable[[list[str]], subprocess.CompletedProcess]

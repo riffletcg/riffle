@@ -729,8 +729,8 @@ def test_a_price_list_fetched_again_that_isnt_the_one_kept_is_set_aside(data_dir
 
 
 def test_the_sync_leaves_the_definitions_it_kept_before_alone(data_dir):
-    """Before 0037 the sync kept the latest definitions as card-definitions.zip, replacing the
-    last; the watch keeps them now, and that file stays as it is."""
+    """Before 2026-09-29 the sync kept the latest definitions as card-definitions.zip, replacing
+    the last; the watch keeps them now, and that file stays as it is."""
     old = data_dir / "card-definitions.zip"
     old.parent.mkdir(parents=True)
     old.write_bytes(b"kept before")

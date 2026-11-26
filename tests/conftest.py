@@ -150,7 +150,7 @@ VIEWS = {
 PRINTINGS = {
     "s-sol-m3c": Printing("s-sol-m3c", "o-sol", "Sol Ring", "m3c", "283"),
     "s-rift-2x2": Printing("s-rift-2x2", "o-rift", "Cyclonic Rift", "2x2", "45"),
-    # a precon box's printings, and others with their art or not (riffle.ingest.precons)
+    # a precon box's printings, and others with their art or not (riffle.ingest.local.precons)
     "s-sol-fdc": Printing("s-sol-fdc", "o-sol", "Sol Ring", "fdc", "286", illustration_id="art-sol"),
     "s-sol-c21": Printing("s-sol-c21", "o-sol", "Sol Ring", "c21", "263", illustration_id="art-sol"),
     "s-sol-lea": Printing("s-sol-lea", "o-sol", "Sol Ring", "lea", "270", illustration_id="art-sol-lea"),
@@ -345,7 +345,7 @@ class Terminal(io.StringIO):
 
 @pytest.fixture
 def denver():
-    """The Mac's clock set to Denver's time (MDT in summer), for what the terminal shows."""
+    """This machine's clock set to Denver's time (MDT in summer), for what the terminal shows."""
     with pytest.MonkeyPatch.context() as m:
         m.setenv("TZ", "America/Denver")
         time.tzset()

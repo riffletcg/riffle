@@ -57,8 +57,8 @@ under the day of its createdAt; those stay:
 
 A game Cardmarket has no guide for (404, or the 403 its download server answers for a file
 it doesn't have) fails for the games played. For the rest it's noted and asked for again
-each time it's due, and after seven times in a row it's a warning (riffle.ingest.empties). A guide
-with no rows is kept nowhere and handled the same way, played or not. If Cardmarket doesn't
+each time it's due, and after seven times in a row it's a warning (riffle.ingest.remote._empties).
+A guide with no rows is kept nowhere and handled the same way, played or not. If Cardmarket doesn't
 answer at all, the games after it fail at once instead of each waiting out its own retries.
 Headers, retries, and 429 handling: riffle.net.
 """

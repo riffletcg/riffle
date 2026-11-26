@@ -444,7 +444,7 @@ def test_a_watch_log_it_can_t_read_is_named_by_its_month(data_dir):
     ]
 
 
-# ---- tcgcsv and Cardmarket kept in runs (0033) --------------------------------------
+# ---- tcgcsv and Cardmarket kept in runs, since 2026-09-29 ---------------------------
 
 
 def test_a_tcgcsv_game_kept_in_its_runs_is_checked_as_its_record_says(data_dir):

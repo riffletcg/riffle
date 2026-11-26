@@ -116,7 +116,7 @@ class Config:
 
     @property
     def manabox_exports(self) -> Path:
-        """Every ManaBox export Riffle has seen, as the file it was (riffle.ingest.manabox.keep)."""
+        """Every ManaBox export Riffle has seen, as the file it was (riffle.ingest.local.manabox.keep)."""
         return data_dir() / "manabox"
 
     @property

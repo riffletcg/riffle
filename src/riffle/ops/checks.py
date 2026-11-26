@@ -181,7 +181,7 @@ def store(lists: tuple[pricelists.PriceList, ...]) -> Report:
 
 def _kept_entries(rep: Report, store: str) -> list[tuple[Path, dict]]:
     """The lists a store's watch log says it kept, each with the file that says so: every month's,
-    and the one file kept before 0054 while it's still there."""
+    and the one file kept before 2026-10-05 while it's still there."""
     found = []
     for path in watching.files(store):
         try:

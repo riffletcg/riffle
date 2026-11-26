@@ -21,7 +21,7 @@ def every(now: datetime, n: int, apart: timedelta, failed: int = -1) -> list[tup
 
 
 def test_the_failure_bound_is_price_watch_numbers():
-    assert round(cadence.upper(0, 90), 4) == 0.0327  # §3: 90 clean checks
+    assert round(cadence.upper(0, 90), 4) == 0.0327  # 90 clean checks
     assert round(cadence.upper(1, 90), 4) == 0.0516
     assert round(cadence.upper(2, 90), 4) == 0.0683
     assert round(cadence.upper(0, 2016), 4) == 0.0015  # a clean week at every firing
@@ -69,8 +69,8 @@ def test_a_list_rarer_than_the_target_still_gets_four_chances(monkeypatch):
     assert cadence.far(made, every(now, 42, timedelta(hours=4)), now) == 1025 * DAY
 
 
-# Plan, Tests: "A list with 14 daily gaps and a clean week of about 2,016 checks gets a far interval
-# of an hour, not L/2."
+# A list with 14 daily gaps and a clean week of about 2,016 checks gets a far interval of an hour,
+# not L/2.
 def test_a_learned_daily_list_with_a_clean_week_is_asked_hourly():
     made = daily(15)
     now = made[-1]
@@ -79,8 +79,8 @@ def test_a_learned_daily_list_with_a_clean_week_is_asked_hourly():
     assert cadence.far(made, week, now) == cadence.LONGEST == timedelta(hours=1)
 
 
-# Plan, Tests: "A list whose gaps are 2 hours, with a clean week at every firing, gets L/4 (under an
-# hour), not L/2: the floor of 4 where the ceiling doesn't reach."
+# A list whose gaps are 2 hours, with a clean week at every firing, gets L/4 (under an hour), not
+# L/2: the floor of 4 where the ceiling doesn't reach.
 def test_the_chances_are_never_under_four():
     made = [T0 + i * timedelta(hours=2) for i in range(15)]
     now = made[-1]
@@ -89,8 +89,8 @@ def test_the_chances_are_never_under_four():
     assert cadence.far(made, every(now, 2016, timedelta(minutes=5)), now) == timedelta(minutes=30)
 
 
-# Plan, Tests: "A list with 14 daily gaps and 28 checks in the week, none failed, gets an hour (its
-# own 5 chances would be L/5, 4.8 hours)."
+# A list with 14 daily gaps and 28 checks in the week, none failed, gets an hour (its own 5 chances
+# would be L/5, 4.8 hours).
 def test_the_far_interval_is_never_over_an_hour():
     made = daily(15)
     now = made[-1]
@@ -98,7 +98,7 @@ def test_the_far_interval_is_never_over_an_hour():
     assert cadence.far(made, every(now, 28, timedelta(hours=6)), now) == cadence.LONGEST
 
 
-# Plan, Tests: "A list whose shortest gap is 15 minutes gets EVERY."
+# A list whose shortest gap is 15 minutes gets EVERY.
 def test_a_list_every_quarter_hour_is_asked_at_every_firing():
     made = [T0 + i * timedelta(minutes=15) for i in range(15)]
     now = made[-1]
@@ -106,7 +106,7 @@ def test_a_list_every_quarter_hour_is_asked_at_every_firing():
     assert cadence.far(made, every(now, 2016, timedelta(minutes=5)), now) == cadence.EVERY
 
 
-# Plan, Tests: "A list rarer than the target (once in eleven years) gets an hour, not its gap."
+# A list rarer than the target (once in eleven years) gets an hour, not its gap.
 def test_a_list_rarer_than_the_target_is_still_asked_hourly():
     made = [T0, T0 + 4100 * DAY]
     now = made[-1] + timedelta(hours=1)
@@ -114,8 +114,8 @@ def test_a_list_rarer_than_the_target_is_still_asked_hourly():
     assert cadence.far(made, every(now, 42, timedelta(hours=4)), now) == cadence.LONGEST
 
 
-# Plan, Tests: "The loss target's own arithmetic, with the ceiling lifted, still gives the intervals
-# the existing tests check."
+# The loss target's own arithmetic, with the ceiling lifted, still gives the intervals the tests
+# above check.
 def test_with_the_ceiling_lifted_the_loss_target_sets_the_interval(monkeypatch):
     monkeypatch.setattr(cadence, "LONGEST", cadence.YEAR)
     made = daily(5)

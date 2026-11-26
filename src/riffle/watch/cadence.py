@@ -22,7 +22,7 @@ A watch job fires every EVERY. At each firing a list is asked for when any of th
 - It's still learning: with no check logged, or under 14 gaps (lateness.LEAST_GAPS) between
   its lists, every firing asks. One publish is counted once, however many times it's kept.
 
-Why these (the vault's price-watch-numbers note has the proof):
+Why these:
 
 - The median of 14 gaps: replayed on GoatBots' 1,349 publishes, it put a list 4 s from where it
   came typically and 5.3 minutes at the 99th percentile, missing by more than 10 minutes 4
@@ -36,14 +36,14 @@ Why these (the vault's price-watch-numbers note has the proof):
   the window would never learn the list was online sooner. The last miss is at most when the
   list went online, so the window opens no later than the lists' true times would open it: the
   bound's error costs requests, never a late find. And the delay is learned in the lead, not
-  beside it, so at most one list a year comes before its window, not one for each. The Mac's
-  clock against the source's is learned there too.
-- The far interval is price-watch-numbers §3's check interval, from each list's own log. On
-  tcgcsv it would settle near 6 hours once a week of checks is logged; the ceiling makes it an
-  hour: about 24 requests a day, against 288 at every firing. A failed check shortens it.
+  beside it, so at most one list a year comes before its window, not one for each. This
+  machine's clock against the source's is learned there too.
+- The far interval comes from each list's own log. On tcgcsv it would settle near 6 hours once
+  a week of checks is logged; the ceiling makes it an hour: about 24 requests a day, against
+  288 at every firing. A failed check shortens it.
 - At least LEAST_CHANCES: a list leaves learning with a clean week of checks at every firing,
   which needs only 2 chances, L/2, 12 hours on a daily list. Cardmarket's second guide of
-  2026-09-30 lived 0.29 L: a quarter meets it and a half doesn't (the vault's 14-gap-replay).
+  2026-09-30 lived 0.29 L: a quarter meets it and a half doesn't.
 - Never over LONGEST: the window finds a list on its schedule, and the far checks are for one
   published off it. One at a random time in a gap of L lives under c with chance c/L and is
   then missed with chance 1 - life/c, so c/(2L) of them are lost: 1 in 8 at L/4, about 1 in 45
@@ -67,7 +67,7 @@ from statistics import median
 from riffle.watch import lateness
 
 EVERY = timedelta(minutes=5)  # a watch job's interval: a Mana Pool list lasts about 30 minutes, six tries
-TARGET = 0.1  # lists a year the checks may cost: one a decade (price-watch-numbers §3)
+TARGET = 0.1  # lists a year the checks may cost: one a decade
 CONFIDENCE = 0.95
 LEAST_CHANCES = 4  # at least four far checks in the shortest gap, down to EVERY
 LONGEST = timedelta(hours=1)  # and at most this: a list published off schedule that lives an hour is kept

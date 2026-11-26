@@ -202,7 +202,7 @@ PRECON = "precon:"
 
 def precon_boxes(mtg_dir: Path) -> dict[str, list[Path]]:
     """Each precon box the deck notes register, with the notes that do: a note's frontmatter
-    says source: precon:<box> for a box you own (riffle.ingest.precons). A note that can't be
+    says source: precon:<box> for a box you own (riffle.ingest.local.precons). A note that can't be
     read is passed over."""
     found: dict[str, list[Path]] = {}
     for p in deck_notes(mtg_dir):
@@ -231,7 +231,7 @@ def from_file(ref: str) -> Deck | None:
 
 
 def find(mtg_dir: Path, ref: str) -> Deck:
-    """A deck by slug ("aesi-lands") or by path to a .md or .txt file (from_file)."""
+    """A deck by slug ("krenko-goblins") or by path to a .md or .txt file (from_file)."""
     found = from_file(ref)
     if found is not None:
         return found
