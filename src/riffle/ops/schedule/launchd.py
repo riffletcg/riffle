@@ -48,7 +48,7 @@ def parse_print(text: str) -> dict[str, str]:
     out: dict[str, str] = {}
     for line in text.splitlines():
         key, sep, value = line.strip().partition(" = ")
-        if sep and key in {"state", "runs", "last exit code", "program"} and key not in out:
+        if sep and key in {"state", "runs", "last exit code"} and key not in out:
             out[key] = value.strip()
     return out
 
@@ -66,7 +66,6 @@ def status(
         runs=info.get("runs"),
         last_exit=info.get("last exit code"),
         state=info.get("state"),
-        program=info.get("program"),
     )
 
 

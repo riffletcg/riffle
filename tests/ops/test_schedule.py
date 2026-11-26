@@ -105,7 +105,6 @@ def test_parse_print_takes_the_job_state_not_the_trigger_state():
     info = sched.parse_print(PRINT)
     assert info == {
         "state": "not running",
-        "program": "/Users/pat/riffle/.venv/bin/riffle",
         "runs": "3",
         "last exit code": "0",
     }

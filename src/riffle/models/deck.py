@@ -1,7 +1,5 @@
 from dataclasses import dataclass, field
 
-BOARDS = ("commander", "main", "sideboard", "companion")
-
 
 @dataclass
 class DeckEntry:

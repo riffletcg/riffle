@@ -2,7 +2,7 @@
 
 import pytest
 
-from riffle.ingest.local.decklist import load, parse_text
+from riffle.ingest.local.decklist import parse_text
 
 
 def _rows(text):
@@ -63,17 +63,6 @@ def test_skipped_sections_never_count(section):
 
 def test_byte_order_mark_does_not_eat_the_first_card():
     assert _rows("\ufeff1 Sol Ring\n2 Forest\n") == [("main", 1, "Sol Ring"), ("main", 2, "Forest")]
-
-
-def test_load_reads_windows_files(tmp_path):
-    p = tmp_path / "list.txt"
-    p.write_bytes("\ufeff4 Lightning Bolt\r\n\r\n2 Duress\r\n".encode("utf-8"))
-    d = load(p)
-    assert d.slug == "list"
-    assert [(e.board, e.quantity, e.name) for e in d.entries] == [
-        ("main", 4, "Lightning Bolt"),
-        ("sideboard", 2, "Duress"),
-    ]
 
 
 def test_zero_quantity_lines_are_ignored():

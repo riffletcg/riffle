@@ -1,11 +1,7 @@
-"""Format legality and playset eligibility.
+"""Format legality.
 
 Per-card status comes from Scryfall's `legalities`; deck rules (size, copy
 limits, sideboard, commander color identity) live here.
-
-Playset rule: buy 4 only if the card is legal in a format being built
-(Modern, Legacy, Pioneer, Pauper). Commander-only cards stay at one copy and
-rotate between decks.
 """
 
 import re
@@ -15,8 +11,6 @@ from riffle.analysis.colors import wubrg_sort
 from riffle.analysis.resolve import resolve_deck
 from riffle.models import CardRules, Deck, DeckEntry
 from riffle.store import Catalog
-
-BUILT_FORMATS = ("modern", "legacy", "pioneer", "pauper")
 
 
 @dataclass(frozen=True)
@@ -114,11 +108,6 @@ def copy_limit(card_id: str, fmt: str, catalog: Catalog, r: CardRules | None = N
         return None
     rules = FORMAT_RULES.get(fmt)
     return rules.copies if rules else 4
-
-
-def playset_eligible(card_id: str, catalog: Catalog) -> bool:
-    """Legal in at least one actively built constructed format."""
-    return any(is_legal(card_id, f, catalog) for f in BUILT_FORMATS)
 
 
 # ---- whole decks ---------------------------------------------------------------

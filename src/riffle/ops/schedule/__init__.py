@@ -10,9 +10,7 @@ from riffle.ops.schedule.jobs import LABEL as LABEL
 from riffle.ops.schedule.jobs import PREFIX as PREFIX
 from riffle.ops.schedule.jobs import SYNC as SYNC
 from riffle.ops.schedule.jobs import TRICKLE as TRICKLE
-from riffle.ops.schedule.jobs import WATCH_EVERY as WATCH_EVERY
 from riffle.ops.schedule.jobs import Job as Job
-from riffle.ops.schedule.jobs import Runner as Runner
 from riffle.ops.schedule.jobs import Status as Status
 from riffle.ops.schedule.jobs import fmt as fmt
 from riffle.ops.schedule.jobs import log_path as log_path

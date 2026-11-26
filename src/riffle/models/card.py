@@ -15,10 +15,6 @@ class Printing:
     usd: float | None = None  # paper, nonfoil
     illustration_id: str = ""  # Scryfall's, the front face's on a two-faced card; "" when it has none
 
-    @property
-    def is_old_border(self) -> bool:
-        return self.frame in {"1993", "1997"}
-
 
 @dataclass(frozen=True)
 class PricedPrinting:

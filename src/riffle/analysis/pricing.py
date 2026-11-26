@@ -43,10 +43,6 @@ class DeckPrice:
     def missing_on_mtgo(self) -> list[str]:
         return [line.name for line in self.lines if line.tix is None]
 
-    @property
-    def unpriced(self) -> list[str]:
-        return [line.name for line in self.lines if line.usd is None and line.to_buy]
-
 
 def price(rows: list[Row], catalog: Catalog) -> DeckPrice:
     prices = catalog.prices([row.card_id for row in rows])
