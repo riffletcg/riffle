@@ -1,8 +1,14 @@
-"""Shared fixtures: an in-memory Catalog (no database, no download) and a test Postgres."""
+"""Shared by every test: an in-memory Catalog (no database, no download), a home, config, and vault
+of the test's own, a progress recorder, a test Postgres, the command runner, and stand-ins for a
+terminal, the scheduler, `riffle status`, and the sync's network and steps."""
 
+import io
 import os
 import pwd
 import re
+import socket
+import subprocess
+import sys
 import time
 from collections.abc import Callable
 from contextlib import contextmanager, suppress
@@ -12,7 +18,11 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+from typer.testing import CliRunner
 
+from riffle import config, net
+from riffle.cli import app
+from riffle.ingest.remote import cardmarket, goatbots, mtgjson, pricelists, scryfall, scryfall_catalog, tcgcsv
 from riffle.links import safe_name
 from riffle.models import CardRules, CardView, Face, PricedPrinting, Prices, Printing
 from riffle.ops import disk
@@ -241,8 +251,9 @@ def opened(cat, monkeypatch):
 def isolated(tmp_path_factory, monkeypatch):
     """Every test gets its own home, config and data directories, a vault at ~/vault, and a
     configured database no one can reach, so nothing a test runs touches real files or the
-    real database. Tests that need their own set HOME and XDG_* again; database tests use the
-    pg fixtures below, and libpq still finds the password in the real ~/.pgpass."""
+    real database. Only the config is written: a test makes the folders it needs. A test that
+    reads ~/.config or ~/.local/share in what Riffle prints takes bare_home; database tests use
+    the pg fixtures below, and libpq still finds the password in the real ~/.pgpass."""
     home = tmp_path_factory.mktemp("home")
     (home / "config" / "riffle").mkdir(parents=True)
     (home / "config" / "riffle" / "config.toml").write_text(
@@ -263,6 +274,48 @@ def isolated(tmp_path_factory, monkeypatch):
 
 
 @pytest.fixture
+def bare_home(tmp_path, monkeypatch) -> Path:
+    """HOME as the test's own folder, with the config and data folders where they go when no XDG
+    variable names them (~/.config and ~/.local/share) and no config written: for a test that
+    reads those paths in what Riffle prints. Returns the home."""
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / ".config"))
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / ".local" / "share"))
+    return tmp_path
+
+
+@pytest.fixture
+def no_config(tmp_path, monkeypatch) -> None:
+    """The config folder as the test's own empty one, so there is no config until the test
+    writes it."""
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+
+
+@pytest.fixture
+def data_dir() -> Path:
+    """Riffle's data folder in the test's own home; nothing has made it yet."""
+    return config.data_dir()
+
+
+# Where a vault at ~/vault keeps its Magic decks, from the home.
+MTG = Path("vault", "games", "tcg", "mtg")
+
+
+@pytest.fixture
+def mtg() -> Path:
+    """The folder the test's config reads Magic decks from, ~/vault/games/tcg/mtg; the test
+    makes it."""
+    return Path.home() / MTG
+
+
+@pytest.fixture
+def bare_mtg(bare_home) -> Path:
+    """The same folder under bare_home, for a test that writes its own config there; the test
+    makes it."""
+    return bare_home / MTG
+
+
+@pytest.fixture
 def unreadable():
     """Takes a file's read permission for the test and gives it back after, so its folder can
     be cleaned up."""
@@ -280,7 +333,14 @@ def unreadable():
         path.chmod(0o644)
 
 
-# ---- times ----------------------------------------------------------------------------
+# ---- terminals and times ---------------------------------------------------------------
+
+
+class Terminal(io.StringIO):
+    """A stream that says it's a terminal."""
+
+    def isatty(self) -> bool:
+        return True
 
 
 @pytest.fixture
@@ -298,7 +358,7 @@ def on_a_terminal(denver, monkeypatch):
     """riffle.times.shown thinks it prints to a terminal, in Denver."""
     from riffle import times
 
-    monkeypatch.setattr(times, "sys", SimpleNamespace(stdout=SimpleNamespace(isatty=lambda: True)))
+    monkeypatch.setattr(times, "sys", SimpleNamespace(stdout=Terminal()))
 
 
 # ---- progress -----------------------------------------------------------------------
@@ -417,6 +477,11 @@ def pg(pg_engine):
 
 # ---- Docker ----------------------------------------------------------------------------
 
+NO_DOCKER = (
+    "docker isn't on PATH, in /usr/local/bin, or in /opt/homebrew/bin: install Docker Engine (Linux)"
+    " or OrbStack or Docker Desktop (macOS), and start it"
+)
+
 
 def docker_env() -> dict[str, str]:
     """The environment docker runs in: the test's, plus the user's own Docker config directory,
@@ -428,3 +493,220 @@ def docker_env() -> dict[str, str]:
         with suppress(KeyError):
             env["DOCKER_CONFIG"] = str(Path(pwd.getpwuid(os.getuid()).pw_dir) / ".docker")
     return env
+
+
+# ---- the command line ------------------------------------------------------------------
+
+
+def invoke(*args: str, **kwargs):
+    """Runs riffle with these arguments; the keywords are CliRunner.invoke's."""
+    return CliRunner().invoke(app, list(args), **kwargs)
+
+
+# ---- the scheduler ---------------------------------------------------------------------
+
+
+class FakeLaunchctl:
+    def __init__(self, loaded=False, bootstrap_rc=0, print_out=""):
+        self.calls = []
+        self.loaded = loaded
+        self.bootstrap_rc = bootstrap_rc
+        self.print_out = print_out
+
+    def __call__(self, args):
+        self.calls.append(args[1])
+        verb = args[1]
+        if verb == "bootout":
+            rc, self.loaded = (0 if self.loaded else 3), False
+            return subprocess.CompletedProcess(args, rc, "", "")
+        if verb == "bootstrap":
+            self.loaded = self.bootstrap_rc == 0
+            err = "Bootstrap failed: 5: Input/output error"
+            return subprocess.CompletedProcess(args, self.bootstrap_rc, "", err)
+        if verb == "print":
+            if self.loaded:
+                return subprocess.CompletedProcess(args, 0, self.print_out, "")
+            return subprocess.CompletedProcess(args, 113, "", "Could not find service")
+        raise AssertionError(f"unexpected launchctl {verb}")
+
+
+PRINT = """gui/501/gg.riffletcg.riffle-sync = {
+	active count = 0
+	path = /Users/pat/Library/LaunchAgents/gg.riffletcg.riffle-sync.plist
+	state = not running
+	program = /Users/pat/riffle/.venv/bin/riffle
+	runs = 3
+	last exit code = 0
+	event triggers = {
+		com.apple.launchd.calendarinterval = {
+			state = active
+		}
+	}
+}
+"""
+
+
+@pytest.fixture
+def schedule_cli(tmp_path, monkeypatch):
+    """`riffle` with the scheduler's own program faked: called with the fake, it returns a
+    function that runs a command and gives its output."""
+    from riffle.ops import schedule
+
+    def faked(fake):
+        install, status, remove = schedule.install, schedule.status, schedule.remove
+        monkeypatch.setattr(
+            schedule,
+            "install",
+            lambda times, job=schedule.SYNC: install(times, tmp_path / "riffle", fake, job=job),
+        )
+        monkeypatch.setattr(schedule, "status", lambda job=schedule.SYNC: status(fake, job=job))
+        monkeypatch.setattr(schedule, "remove", lambda job=schedule.SYNC: remove(fake, job=job))
+        return lambda *args: invoke(*args).output
+
+    return faked
+
+
+@pytest.fixture
+def launchd_cli(monkeypatch, schedule_cli):
+    """schedule_cli on a Mac; the plists land under the test's own home."""
+    monkeypatch.setattr(sys, "platform", "darwin")
+    return schedule_cli
+
+
+# ---- riffle status ---------------------------------------------------------------------
+
+
+@pytest.fixture
+def quiet(monkeypatch):
+    """`riffle status` at the time it's called with, its jobs and backup lines given without
+    asking this machine, the jobs' as on a Mac."""
+    from riffle.ops import status
+
+    def at(now):
+        monkeypatch.setattr(sys, "platform", "darwin")
+        monkeypatch.setattr(status, "jobs_lines", lambda *_, **__: ["9 of 9 loaded; every last run exited 0"])
+        monkeypatch.setattr(status, "backup_line", lambda *_, **__: "Time Machine to Backup Disk")
+        monkeypatch.setattr(status.times, "now", lambda: now)
+
+    return at
+
+
+# ---- the sync --------------------------------------------------------------------------
+
+
+@pytest.fixture
+def prices_kept(monkeypatch) -> None:
+    """The day's Scryfall prices kept already, 2026-09-26, so a sync reads no bulk file and its
+    price step has nothing new to keep."""
+    monkeypatch.setattr(scryfall, "snapshot_prices", lambda: (Path("/d/2026-09-26.jsonl.gz"), False))
+
+
+# A deck note for the sync's vault half to read.
+BURN_NOTE = "---\ngame: mtg\nformat: modern\n---\n\n## Moxfield import\n\n```\n4 Lightning Bolt\n```\n"
+
+
+def write_burn(mtg: Path, note: str = BURN_NOTE) -> Path:
+    """Writes the one deck note, modern/burn.md, under mtg/, which it returns."""
+    (mtg / "modern").mkdir(parents=True)
+    (mtg / "modern" / "burn.md").write_text(note)
+    return mtg
+
+
+@pytest.fixture
+def burn_note() -> str:
+    """The note one_deck writes; a test file whose deck is written another way gives its own."""
+    return BURN_NOTE
+
+
+@pytest.fixture
+def one_deck(mtg, opened, prices_kept, burn_note) -> Path:
+    """One deck note, modern/burn.md, in the vault the test's config names, with the catalog in
+    memory and a price day kept, so a sync has its vault half to do. Returns mtg/."""
+    return write_burn(mtg, burn_note)
+
+
+class Clock:
+    """time.monotonic and time.sleep for net.wait_online, with no real waiting."""
+
+    def __init__(self) -> None:
+        self.now = 0.0
+
+    def monotonic(self) -> float:
+        return self.now
+
+    def sleep(self, seconds: float) -> None:
+        self.now += seconds
+
+
+def network(monkeypatch, up_after: float | None, down: tuple[str, ...] = ()) -> list[tuple[str, int]]:
+    """The network comes up after up_after seconds (None: never), but for the hosts in down, whose
+    names never resolve. Returns every address tried."""
+    clock, tried = Clock(), []
+
+    def create_connection(address, timeout):
+        tried.append(address)
+        if address[0] in down:
+            raise socket.gaierror(8, "nodename nor servname provided, or not known")
+        if up_after is None or clock.now < up_after:
+            raise OSError("Network is unreachable")
+        return socket.socket()
+
+    monkeypatch.setattr(net.socket, "create_connection", create_connection)
+    monkeypatch.setattr(net.time, "monotonic", clock.monotonic)
+    monkeypatch.setattr(net.time, "sleep", clock.sleep)
+    return tried
+
+
+# What an online sync does, in order: the Scryfall download and catalog load, then each price source.
+ONLINE = [
+    "refresh",
+    "catalog",
+    "mtgjson",
+    "mtgjson 90 days",
+    "goatbots",
+    "goatbots years",
+    "cardmarket",
+    "cardkingdom",
+    "manapool",
+    "tcgcsv",
+]
+
+
+def online_steps(monkeypatch, calls, refresh_fails=False):
+    """The online steps, recorded in calls, each reporting a step as the real one does."""
+
+    def refresh(force, tracker):
+        calls.append("refresh")
+        step = tracker.step("Scryfall bulk data")
+        if refresh_fails:
+            step.fail("HTTP 503")
+        else:
+            step.ok("current")
+
+    def watch(delay, tracker, always):
+        calls.append("tcgcsv")
+        tracker.step("tcgcsv mtg").ok("456 groups")
+        snap = tcgcsv.Snapshot(day=date(2026, 9, 26), fetched=["mtg"], groups={"mtg": 456})
+        return tcgcsv.Watched(asked=True, snap=snap)
+
+    monkeypatch.setattr(scryfall, "refresh", refresh)
+    monkeypatch.setattr(scryfall_catalog, "update", lambda tracker, force: calls.append("catalog"))
+    monkeypatch.setattr(mtgjson, "watch", lambda tracker, always: calls.append("mtgjson"))
+    monkeypatch.setattr(mtgjson, "snapshot", lambda tracker: calls.append("mtgjson 90 days"))
+    monkeypatch.setattr(goatbots, "watch", lambda tracker, always: calls.append("goatbots"))
+    monkeypatch.setattr(goatbots, "snapshot", lambda tracker: calls.append("goatbots years"))
+    monkeypatch.setattr(cardmarket, "watch", lambda tracker, always: calls.append("cardmarket"))
+    monkeypatch.setattr(pricelists, "watch", lambda lists, tracker: calls.append(lists[0].store))
+    monkeypatch.setattr(tcgcsv, "watch", watch)
+
+
+# ---- the closing line of a run written as plain lines ----------------------------------
+
+EXITED = re.compile(r"\d\d:\d\d:\d\d  exited (\d) after \d+\.\ds")
+
+
+def before_closing(out: str) -> str:
+    """A run's last line before its closing line, which says it exited 1."""
+    *_v, last, closed = out.rstrip("\n").split("\n")
+    assert EXITED.fullmatch(closed).group(1) == "1"
+    return last

@@ -4,11 +4,10 @@ from datetime import date
 from pathlib import Path
 
 import pytest
-from typer.testing import CliRunner
 
 from riffle import net
-from riffle.cli import app
 from riffle.ingest.remote import cardmarket, goatbots, mtgjson, pricelists, scryfall, scryfall_catalog, tcgcsv
+from tests.conftest import invoke
 
 
 def fake_snapshot(fetched: dict[str, int], failed: dict[str, str] | None = None):
@@ -73,7 +72,7 @@ def test_ingest_prices_reports_every_source(monkeypatch):
         cardmarket, "watch", fake_source("Cardmarket mtg", ("ok", "kept 2026-09-24, 98,512 products"))
     )
     monkeypatch.setattr(tcgcsv, "watch", fake_snapshot({"fab": 105, "op": 87}))
-    result = CliRunner().invoke(app, ["ingest", "prices"])
+    result = invoke("ingest", "prices")
     assert result.exit_code == 0, result.output
     lines = result.output.splitlines()
     assert lines[0].endswith("  riffle ingest prices")
@@ -101,7 +100,7 @@ def test_ingest_prices_reports_every_source_failing_then_exits_1(monkeypatch):
     monkeypatch.setattr(cardmarket, "watch", fake_source("Cardmarket mtg", ("fail", "HTTP 503")))
     monkeypatch.setattr(pricelists, "watch", fake_source(None, ("fail", "HTTP 502")))
     monkeypatch.setattr(tcgcsv, "watch", down)
-    result = CliRunner().invoke(app, ["ingest", "prices"])
+    result = invoke("ingest", "prices")
     assert result.exit_code == 1, result.output
     assert "! Scryfall prices: no bulk file yet — run: riffle ingest scryfall" in result.output
     assert "! MTGJSON prices today: HTTP 404" in result.output
@@ -119,18 +118,17 @@ def test_ingest_prices_reports_every_source_failing_then_exits_1(monkeypatch):
     assert "  exited 1 after " in closed
 
 
-def test_a_disk_error_in_one_source_is_reported_and_the_rest_still_run(monkeypatch):
+def test_a_disk_error_in_one_source_is_reported_and_the_rest_still_run(prices_kept, monkeypatch):
     def full(*lists, tracker, always=True):
         raise OSError(28, "No space left on device")
 
-    monkeypatch.setattr(scryfall, "snapshot_prices", lambda: (Path("/d/2026-09-24.jsonl.gz"), False))
     for source in (mtgjson, goatbots):
         monkeypatch.setattr(source, "watch", full)
         monkeypatch.setattr(source, "snapshot", full)
     monkeypatch.setattr(cardmarket, "watch", full)
     monkeypatch.setattr(pricelists, "watch", full)
     monkeypatch.setattr(tcgcsv, "watch", fake_snapshot({"mtg": 456}))
-    result = CliRunner().invoke(app, ["ingest", "prices"])
+    result = invoke("ingest", "prices")
     assert result.exit_code == 1, result.output
     assert "! MTGJSON prices: [Errno 28] No space left on device" in result.output
     assert "! MTGJSON 90 days: [Errno 28] No space left on device" in result.output
@@ -145,17 +143,16 @@ def test_a_disk_error_in_one_source_is_reported_and_the_rest_still_run(monkeypat
 def test_a_game_that_failed_is_named(monkeypatch):
     monkeypatch.setattr(scryfall, "snapshot_prices", lambda: (Path("/d/2026-09-24.jsonl.gz"), False))
     monkeypatch.setattr(tcgcsv, "watch", fake_snapshot({"mtg": 456}, failed={"fab": "HTTP 503"}))
-    result = CliRunner().invoke(app, ["ingest", "prices"])
+    result = invoke("ingest", "prices")
     assert "  Scryfall prices: already have 2026-09-24 (" in result.output
     assert "! tcgcsv fab: HTTP 503" in result.output
 
 
-def test_ingest_scryfall_loads_the_postgres_catalog_after_the_download(monkeypatch):
+def test_ingest_scryfall_loads_the_postgres_catalog_after_the_download(prices_kept, monkeypatch):
     calls = []
     monkeypatch.setattr(scryfall, "refresh", lambda force, tracker: calls.append(("refresh", force)))
     monkeypatch.setattr(scryfall_catalog, "update", lambda tracker, force: calls.append(("postgres", force)))
-    monkeypatch.setattr(scryfall, "snapshot_prices", lambda: (Path("/d/2026-09-24.jsonl.gz"), False))
-    result = CliRunner().invoke(app, ["ingest", "scryfall", "--force", "--no-sync"])
+    result = invoke("ingest", "scryfall", "--force", "--no-sync")
     assert result.exit_code == 0, result.output
     assert calls == [("refresh", True), ("postgres", True)]
 
@@ -167,25 +164,20 @@ def test_an_offline_resync_mentions_prices_only_when_it_kept_some(monkeypatch):
     )
     monkeypatch.setattr(scryfall_catalog, "update", lambda tracker, force: None)
     monkeypatch.setattr(scryfall, "snapshot_prices", lambda: (Path("/d/2026-09-24.jsonl.gz"), kept["now"]))
-    quiet = CliRunner().invoke(app, ["ingest", "scryfall", "--no-sync"])
+    quiet = invoke("ingest", "scryfall", "--no-sync")
     assert quiet.exit_code == 0, quiet.output
     assert "Scryfall bulk data: current" in quiet.output and "Scryfall prices" not in quiet.output
     kept["now"] = True
-    assert (
-        "Scryfall prices: kept 2026-09-24"
-        in CliRunner().invoke(app, ["ingest", "scryfall", "--no-sync"]).output
-    )
+    assert "Scryfall prices: kept 2026-09-24" in invoke("ingest", "scryfall", "--no-sync").output
 
 
-def test_a_sync_that_finds_no_new_tcgcsv_day_says_so_on_its_step_alone(monkeypatch):
-    monkeypatch.setattr(scryfall, "snapshot_prices", lambda: (Path("/d/2026-09-24.jsonl.gz"), False))
-
+def test_a_sync_that_finds_no_new_tcgcsv_day_says_so_on_its_step_alone(prices_kept, monkeypatch):
     def same_day(delay, tracker, always):
         tracker.step("tcgcsv").ok("no new day since the one made 2026-09-24 20:05 UTC")
         return tcgcsv.Watched(asked=True)
 
     monkeypatch.setattr(tcgcsv, "watch", same_day)
-    result = CliRunner().invoke(app, ["ingest", "prices"])
+    result = invoke("ingest", "prices")
     assert result.exit_code == 0, result.output
     assert "tcgcsv: no new day since the one made 2026-09-24 20:05 UTC" in result.output
     assert "tcgcsv prices:" not in result.output

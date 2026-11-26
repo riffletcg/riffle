@@ -14,13 +14,7 @@ from riffle.watch import cadence, lateness, watching
 NOW = datetime(2026, 9, 29, 12, 0, tzinfo=UTC)
 
 
-@pytest.fixture
-def data(tmp_path, monkeypatch):
-    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path))
-    return tmp_path / "riffle"
-
-
-def test_a_log_line_that_isnt_an_entry_is_left_out(data):
+def test_a_log_line_that_isnt_an_entry_is_left_out():
     assert watching.entries("tcgcsv") == []
     watching.log("tcgcsv", {"at": "2026-09-29T115500Z", "list": "last-updated", "result": "same"})
     with watching.log_path("tcgcsv", NOW).open("a") as f:
@@ -29,7 +23,7 @@ def test_a_log_line_that_isnt_an_entry_is_left_out(data):
     assert watching.entries("tcgcsv") == [kept]
 
 
-def test_each_check_goes_in_the_month_file_of_its_time(data, monkeypatch):
+def test_each_check_goes_in_the_month_file_of_its_time(monkeypatch):
     monkeypatch.setattr(times, "now", lambda: datetime(2026, 11, 2, tzinfo=UTC))
     for entry in (
         {"at": "2026-10-01T000500Z", "list": "mtg", "result": "kept"},
@@ -46,9 +40,9 @@ def test_each_check_goes_in_the_month_file_of_its_time(data, monkeypatch):
     assert [entry["result"] for entry in watching.back("cardmarket")] == ["failed", "kept", "unchanged"]
 
 
-def old_log(data, store: str, text: str) -> None:
-    (data / store).mkdir(parents=True, exist_ok=True)
-    (data / store / "watch.jsonl").write_text(text)
+def old_log(data_dir, store: str, text: str) -> None:
+    (data_dir / store).mkdir(parents=True, exist_ok=True)
+    (data_dir / store / "watch.jsonl").write_text(text)
 
 
 OLD = (
@@ -58,38 +52,38 @@ OLD = (
 )
 
 
-def test_the_log_kept_before_month_files_moves_to_its_last_entry_s_month_once_a_run_holds_the_lock(data):
-    old_log(data, "cardmarket", OLD)
-    inode = (data / "cardmarket" / "watch.jsonl").stat().st_ino
+def test_the_log_kept_before_month_files_moves_to_its_last_entry_s_month_once_a_run_holds_the_lock(data_dir):
+    old_log(data_dir, "cardmarket", OLD)
+    inode = (data_dir / "cardmarket" / "watch.jsonl").stat().st_ino
     assert [entry["result"] for entry in watching.read("cardmarket", NOW).entries] == ["kept", "unchanged"]
     with watching.held("cardmarket") as mine:
         assert mine
-    dest = data / "cardmarket" / "watch" / "2026-10.jsonl"
+    dest = data_dir / "cardmarket" / "watch" / "2026-10.jsonl"
     assert watching.files("cardmarket") == [dest]
     assert dest.read_text() == OLD and dest.stat().st_ino == inode  # moved, not copied
     watching.moved("cardmarket")  # nothing left to move
     assert dest.read_text() == OLD
 
 
-def test_a_month_file_there_before_the_move_keeps_its_lines_after_the_old_ones(data):
-    old_log(data, "cardmarket", OLD)
+def test_a_month_file_there_before_the_move_keeps_its_lines_after_the_old_ones(data_dir):
+    old_log(data_dir, "cardmarket", OLD)
     newer = '{"at": "2026-10-05T090000Z", "list": "mtg", "result": "unchanged"}\n'
-    dest = data / "cardmarket" / "watch" / "2026-10.jsonl"
+    dest = data_dir / "cardmarket" / "watch" / "2026-10.jsonl"
     dest.parent.mkdir()
     dest.write_text(newer)
     (dest.parent / "2026-10.jsonl.part").write_text("a move cut off while writing")
     watching.moved("cardmarket")
-    assert dest.read_text() == OLD + "\n" + newer and not (data / "cardmarket" / "watch.jsonl").exists()
-    old_log(data, "cardmarket", OLD)  # cut off after the month file was written, before the old went
+    assert dest.read_text() == OLD + "\n" + newer and not (data_dir / "cardmarket" / "watch.jsonl").exists()
+    old_log(data_dir, "cardmarket", OLD)  # cut off after the month file was written, before the old went
     watching.moved("cardmarket")
     assert dest.read_text() == OLD + "\n" + newer and watching.files("cardmarket") == [dest]
 
 
-def test_an_old_log_with_no_time_it_can_read_moves_to_now_s_month(data, monkeypatch):
+def test_an_old_log_with_no_time_it_can_read_moves_to_now_s_month(data_dir, monkeypatch):
     monkeypatch.setattr(times, "now", lambda: NOW)
-    old_log(data, "tcgcsv", "not JSON\n")
+    old_log(data_dir, "tcgcsv", "not JSON\n")
     watching.moved("tcgcsv")
-    assert (data / "tcgcsv" / "watch" / "2026-09.jsonl").read_text() == "not JSON\n"
+    assert (data_dir / "tcgcsv" / "watch" / "2026-09.jsonl").read_text() == "not JSON\n"
 
 
 START = datetime(2026, 9, 1, tzinfo=UTC)
@@ -141,7 +135,7 @@ def a_year_of_checks(until: datetime) -> list[dict]:
     ],
 )
 def test_the_schedule_from_month_files_is_the_schedule_from_one_file_holding_the_same_lines(
-    data, monkeypatch, now, months
+    monkeypatch, now, months
 ):
     every = a_year_of_checks(now)
     for entry in every:
@@ -173,18 +167,18 @@ def test_the_schedule_from_month_files_is_the_schedule_from_one_file_holding_the
     assert [name for name in read if name != "watch.jsonl"] == months
 
 
-def test_a_month_s_summary_holds_what_a_run_needs_of_it(data):
+def test_a_month_s_summary_holds_what_a_run_needs_of_it(data_dir):
     every = a_year_of_checks(datetime(2026, 10, 31, 23, 59, tzinfo=UTC))
     for entry in every:
         watching.log("mtgjson", entry)
     watching.read("mtgjson", datetime(2026, 12, 15, tzinfo=UTC), keep=True)
-    september = json.loads((data / "mtgjson" / "watch" / "2026-09.summary.json").read_text())
+    september = json.loads((data_dir / "mtgjson" / "watch" / "2026-09.summary.json").read_text())
     daily = september["lists"]["daily"]
     assert (daily["checks"], daily["failures"], daily["longest"]) == (240, 18, 16.5)
     alone = watching.online([entry for entry in every if entry["at"] < "2026-10"], "daily")
     assert daily["online"] == {runs.name(m): runs.name(b) for m, b in alone.items()}
     assert daily["online"]["2026-09-03T060200Z"] == "2026-09-03T090100Z"  # served late
-    october = json.loads((data / "mtgjson" / "watch" / "2026-10.summary.json").read_text())
+    october = json.loads((data_dir / "mtgjson" / "watch" / "2026-10.summary.json").read_text())
     again = datetime(2026, 9, 30, 6, 1, tzinfo=UTC)  # got again on 1 October: the first bound stands
     assert october["lists"]["daily"]["online"][runs.name(again)] == "2026-09-30T210100Z"
     read = watching.read("mtgjson", datetime(2026, 12, 15, tzinfo=UTC))
@@ -195,11 +189,11 @@ def test_a_month_s_summary_holds_what_a_run_needs_of_it(data):
     assert october["carry"]["daily"]["last"]["at"] == "2026-10-31T210100Z"
 
 
-def test_a_summary_missing_or_unreadable_is_made_again_and_written_only_when_the_run_holds_the_lock(data):
+def test_a_summary_missing_or_unreadable_is_made_again_and_written_only_when_the_run_holds_the_lock(data_dir):
     now = datetime(2027, 9, 10, 12, tzinfo=UTC)
     for entry in a_year_of_checks(now):
         watching.log("mtgjson", entry)
-    folder = data / "mtgjson" / "watch"
+    folder = data_dir / "mtgjson" / "watch"
     first = watching.read("mtgjson", now)
     assert list(folder.glob("*.summary.json")) == []
     assert watching.read("mtgjson", now, keep=True) == first
@@ -236,7 +230,7 @@ def test_what_a_summary_carries_and_what_it_leaves_out():
     }
 
 
-def test_a_copy_set_aside_in_an_earlier_month_is_found(data, tmp_path):
+def test_a_copy_set_aside_in_an_earlier_month_is_found(tmp_path):
     aside = {"result": "failed", "aside": "a.zip", "publish": "x"}
     watching.log("goatbots", {"at": "2026-08-30T100000Z", "list": "prices"} | aside)
     watching.log("goatbots", {"at": "2026-09-29T100000Z", "list": "other"} | aside | {"aside": "b.zip"})
@@ -247,7 +241,7 @@ def test_a_copy_set_aside_in_an_earlier_month_is_found(data, tmp_path):
     assert str(e) == "not a zip; a copy of this publish is set aside already as a.zip, asked again next run"
 
 
-def test_checks_and_the_longest_fetch_come_from_the_log(data):
+def test_checks_and_the_longest_fetch_come_from_the_log():
     for entry in (
         {"at": "2026-09-29T100000Z", "list": "mtg", "result": "kept", "seconds": 2.5},
         {"at": "2026-09-29T110000Z", "list": "mtg", "result": "failed", "why": "HTTP 503", "seconds": 60},
@@ -267,7 +261,7 @@ def test_checks_and_the_longest_fetch_come_from_the_log(data):
     assert watching.longest(found, "op", NOW, timedelta(days=30)) == timedelta(0)
 
 
-def test_when_each_list_could_first_be_online_comes_from_its_checks(data):
+def test_when_each_list_could_first_be_online_comes_from_its_checks():
     for entry in (
         {"at": "2026-09-29T211657Z", "list": "prices-today", "result": "kept", "made": "2026-09-29T061238Z"},
         {"at": "2026-09-30T050000Z", "list": "prices-today", "result": "unchanged"},  # before it was made
@@ -321,15 +315,15 @@ def test_a_list_not_due_says_when_it_goes_online_once_that_s_after_its_expected_
     )
 
 
-def test_etags_that_cant_be_read_are_none(data):
+def test_etags_that_cant_be_read_are_none(data_dir):
     assert watching.load_tags("cardmarket") == {}
     watching.save_tags("cardmarket", {"mtg": '"abc"'})
-    assert json.loads((data / "cardmarket" / "watch-etags.json").read_text()) == {"mtg": '"abc"'}
-    (data / "cardmarket" / "watch-etags.json").write_text('{"mtg": 5, "fab": "\\"x\\""}')
+    assert json.loads((data_dir / "cardmarket" / "watch-etags.json").read_text()) == {"mtg": '"abc"'}
+    (data_dir / "cardmarket" / "watch-etags.json").write_text('{"mtg": 5, "fab": "\\"x\\""}')
     assert watching.load_tags("cardmarket") == {"fab": '"x"'}
 
 
-def test_the_days_kept_come_from_the_log_and_one_it_cant_read_is_left_out(data):
+def test_the_days_kept_come_from_the_log_and_one_it_cant_read_is_left_out():
     for day in ("2026-09-28", "2026-09-27", "someday", "2026-09-28"):
         watching.log("goatbots", {"at": "2026-09-29T031600Z", "list": "prices", "result": "kept", "day": day})
     watching.log(
@@ -351,7 +345,7 @@ def kept(tags: dict[str, str], now: datetime, step) -> dict:
     return {"result": "kept"}
 
 
-def test_one_list_s_bug_fails_its_own_step_and_the_lists_after_it_are_asked(data, tracker):
+def test_one_list_s_bug_fails_its_own_step_and_the_lists_after_it_are_asked(data_dir, tracker):
     def broken(tags: dict[str, str], now: datetime, step) -> dict:
         raise KeyError("createdAt")
 
@@ -362,23 +356,27 @@ def test_one_list_s_bug_fails_its_own_step_and_the_lists_after_it_are_asked(data
         step.ok("no new list")
         return {"result": "unchanged"}
 
-    lists = [listed("first", kept, data), listed("broken", broken, data), listed("after", after, data)]
+    lists = [
+        listed("first", kept, data_dir),
+        listed("broken", broken, data_dir),
+        listed("after", after, data_dir),
+    ]
     res = watching.many("store", "Store", lists, tracker, lambda: NOW, always=True)
-    why = f"KeyError: 'createdAt' (unexpected; details in {data / 'errors.log'}); asked again next run"
+    why = f"KeyError: 'createdAt' (unexpected; details in {data_dir / 'errors.log'}); asked again next run"
     assert res.failed == [("Store broken", why)] and asked == ["after"] and res.same == ["Store after"]
     assert tracker.outcomes()["Store broken"] == ("fail", why)
     assert watching.load_tags("store") == {"first": '"1"'}
     entry = next(e for e in watching.entries("store") if e["list"] == "broken")
     assert entry["result"] == "failed" and entry["why"] == why and "seconds" in entry
-    assert "KeyError: 'createdAt'" in (data / "errors.log").read_text()
+    assert "KeyError: 'createdAt'" in (data_dir / "errors.log").read_text()
 
 
-def test_the_etags_kept_are_saved_however_the_run_ends(data, tracker):
+def test_the_etags_kept_are_saved_however_the_run_ends(data_dir, tracker):
     def then(run: watching.Pass) -> None:
         raise RuntimeError("a bug after the lists")
 
     with pytest.raises(RuntimeError):
-        watching.many("store", "Store", [listed("first", kept, data)], tracker, lambda: NOW, True, then)
+        watching.many("store", "Store", [listed("first", kept, data_dir)], tracker, lambda: NOW, True, then)
     assert watching.load_tags("store") == {"first": '"1"'}
 
 

@@ -6,14 +6,14 @@ from datetime import UTC, date, datetime, timedelta
 from types import SimpleNamespace
 
 import pytest
-from typer.testing import CliRunner
 
 from riffle import locks, net
-from riffle.cli import app
 from riffle.ingest.remote import scryfall
 from riffle.ingest.remote.scryfall import download_url
 from riffle.progress import SILENT
 from riffle.watch import watching
+from tests.conftest import invoke
+from tests.ingest.remote.conftest import Source
 
 
 def test_prefers_jsonl_link_after_the_2026_format_change():
@@ -56,18 +56,16 @@ def snapshot_lines(path):
         return [json.loads(line) for line in f]
 
 
-def test_snapshot_keeps_each_printing_prices_for_the_bulk_day(tmp_path, monkeypatch):
-    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path))
-    write_bulk(tmp_path / "riffle")
+def test_snapshot_keeps_each_printing_prices_for_the_bulk_day(data_dir):
+    write_bulk(data_dir)
     path, written = scryfall.snapshot_prices()
-    assert written and path == tmp_path / "riffle" / "scryfall" / "daily" / "2026-09-24.jsonl.gz"
+    assert written and path == data_dir / "scryfall" / "daily" / "2026-09-24.jsonl.gz"
     assert snapshot_lines(path) == [{"id": c["id"], "prices": c["prices"]} for c in CARDS]
     assert scryfall.snapshot_prices() == (path, False)
 
 
-def test_snapshot_reads_the_old_array_format_and_dates_by_mtime_without_meta(tmp_path, monkeypatch):
-    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path))
-    bulk = write_bulk(tmp_path / "riffle", name="default-cards.json", updated_at=None)
+def test_snapshot_reads_the_old_array_format_and_dates_by_mtime_without_meta(data_dir):
+    bulk = write_bulk(data_dir, name="default-cards.json", updated_at=None)
     stamp = datetime(2026, 3, 4, 12, tzinfo=UTC).timestamp()
     os.utime(bulk, (stamp, stamp))
     assert scryfall.bulk_day(bulk) == date(2026, 3, 4)
@@ -75,12 +73,11 @@ def test_snapshot_reads_the_old_array_format_and_dates_by_mtime_without_meta(tmp
     assert written and path.name == "2026-03-04.jsonl.gz" and len(snapshot_lines(path)) == 2
 
 
-def test_snapshot_needs_a_bulk_file(tmp_path, monkeypatch):
-    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path))
+def test_snapshot_needs_a_bulk_file(data_dir):
     with pytest.raises(FileNotFoundError):
         scryfall.snapshot_prices()
-    (tmp_path / "riffle").mkdir()
-    (tmp_path / "riffle" / "default-cards.jsonl.gz.part").write_bytes(b"")  # a half download doesn't count
+    data_dir.mkdir(parents=True)
+    (data_dir / "default-cards.jsonl.gz.part").write_bytes(b"")  # a half download doesn't count
     assert scryfall.bulk_file() is None
 
 
@@ -110,7 +107,8 @@ class Scryfall:
 
     def __init__(self, monkeypatch, *entries, files=None, sets=SET_LIST):
         self.entries, self.files, self.sets = list(entries), dict(files or {}), sets
-        self.downloaded: list[str] = []
+        self.source = Source(self.files)
+        self.downloaded = self.source.asked
         self.asked: list[str] = []  # each api.scryfall.com request
         monkeypatch.setattr(net, "get", self.get)
         monkeypatch.setattr(net, "download", self.download)
@@ -123,15 +121,7 @@ class Scryfall:
         return self.sets
 
     def download(self, url, dest, progress=None, **kwargs):
-        self.downloaded.append(url)
-        body = self.files.get(url)
-        if body is None:
-            return None
-        dest.parent.mkdir(parents=True, exist_ok=True)
-        dest.write_bytes(body)
-        if progress:
-            progress(len(body), len(body))
-        return len(body)
+        return self.source.download(url, dest, progress)
 
 
 @pytest.fixture
@@ -589,15 +579,14 @@ def test_the_types_and_their_publishes_are_learned_from_the_store():
     assert scryfall.publishes("unique_artwork") == []
 
 
-def test_riffle_watch_scryfall_keeps_a_new_publish_and_exits_1_on_a_failure(monkeypatch, tmp_path, clock):
-    monkeypatch.setenv("HOME", str(tmp_path))
+def test_riffle_watch_scryfall_keeps_a_new_publish_and_exits_1_on_a_failure(monkeypatch, clock):
     default = entry("default_cards", AM)
     served = Scryfall(monkeypatch, default, files={default["jsonl_download_uri"]: gz(CARDS)})
-    result = CliRunner().invoke(app, ["watch", "scryfall"])
+    result = invoke("watch", "scryfall")
     assert result.exit_code == 0, result.output
     assert "Scryfall default cards" in result.output and "kept the 2026-09-24 09:05 UTC file" in result.output
     served.entries = []
-    result = CliRunner().invoke(app, ["watch", "scryfall"])
+    result = invoke("watch", "scryfall")
     assert result.exit_code == 1 and "no bulk file of type default_cards" in result.output
 
 
@@ -766,25 +755,23 @@ def test_a_failed_set_list_fetch_is_reported_never_raised(monkeypatch, tracker, 
 # ---- the bulk file's day, and a kept file found corrupt ---------------------------------------------
 
 
-def test_the_bulk_file_s_publication_time(tmp_path, monkeypatch):
-    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path))
-    bulk = write_bulk(tmp_path / "riffle")
+def test_the_bulk_file_s_publication_time(data_dir):
+    bulk = write_bulk(data_dir)
     assert scryfall.bulk_updated_at(bulk) == datetime(2026, 9, 24, 9, 5, 40, 725000, tzinfo=UTC)
-    write_bulk(tmp_path / "riffle", updated_at="2026-09-24T09:05:40")
+    write_bulk(data_dir, updated_at="2026-09-24T09:05:40")
     assert scryfall.bulk_updated_at(bulk) == datetime(2026, 9, 24, 9, 5, 40, tzinfo=UTC)
 
 
-def test_a_bulk_file_cut_short_is_set_aside_and_fetched_again(tmp_path, monkeypatch):
-    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path))
-    bulk = write_bulk(tmp_path / "riffle")
+def test_a_bulk_file_cut_short_is_set_aside_and_fetched_again(data_dir):
+    bulk = write_bulk(data_dir)
     bulk.write_bytes(bulk.read_bytes()[:-12])  # the gzip trailer and some data gone
     with pytest.raises(
         scryfall.CorruptBulk, match="cut short or corrupt.*set aside as default-cards.jsonl.gz.bad"
     ):
         scryfall.snapshot_prices()
     assert scryfall.bulk_file() is None  # so the next online refresh downloads it again
-    assert (tmp_path / "riffle" / "default-cards.jsonl.gz.bad").exists()
-    assert not list((tmp_path / "riffle" / "scryfall" / "daily").glob("*"))
+    assert (data_dir / "default-cards.jsonl.gz.bad").exists()
+    assert not list((data_dir / "scryfall" / "daily").glob("*"))
 
 
 def test_a_kept_file_found_corrupt_twice_keeps_both(monkeypatch, clock):
@@ -804,21 +791,19 @@ def test_a_kept_file_found_corrupt_twice_keeps_both(monkeypatch, clock):
 
 
 @pytest.mark.parametrize("meta", ["{not json", "[]", '"2026-09-24"', "\xff"])
-def test_an_unreadable_bulk_meta_counts_as_missing(tmp_path, monkeypatch, meta):
-    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path))
-    bulk = write_bulk(tmp_path / "riffle")
+def test_an_unreadable_bulk_meta_counts_as_missing(data_dir, meta):
+    bulk = write_bulk(data_dir)
     scryfall.meta_path().write_text(meta, encoding="latin-1")
     stamp = datetime(2026, 9, 24, 12, tzinfo=UTC).timestamp()
     os.utime(bulk, (stamp, stamp))
     assert scryfall.bulk_day(bulk) == date(2026, 9, 24)
 
 
-def test_an_error_while_keeping_prices_leaves_no_partial_file(tmp_path, monkeypatch):
-    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path))
-    bulk = write_bulk(tmp_path / "riffle")
+def test_an_error_while_keeping_prices_leaves_no_partial_file(data_dir):
+    bulk = write_bulk(data_dir)
     with gzip.open(bulk, "wt", encoding="utf-8") as f:
         f.write('{"name": "no id"}\n')
     with pytest.raises(KeyError):
         scryfall.snapshot_prices()
-    assert not list((tmp_path / "riffle" / "scryfall" / "daily").glob("*"))
+    assert not list((data_dir / "scryfall" / "daily").glob("*"))
     assert scryfall.bulk_file() == bulk  # a file that reads whole isn't set aside

@@ -11,6 +11,7 @@ from rich.console import Console
 from rich.progress import Progress
 
 from riffle import progress
+from tests.conftest import Terminal
 
 
 @pytest.mark.parametrize(
@@ -302,14 +303,9 @@ def test_lines_the_cli_prints_during_the_steps_go_above_them(capsys):
     assert capsys.readouterr() == ("", "")  # nothing went around the display
 
 
-class _Terminal(io.StringIO):
-    def isatty(self) -> bool:
-        return True
-
-
 def test_open_tracker_is_live_on_a_terminal(monkeypatch):
     monkeypatch.setenv("TERM", "xterm-256color")
-    monkeypatch.setattr(sys, "stdout", _Terminal())
+    monkeypatch.setattr(sys, "stdout", Terminal())
     with progress.open_tracker("riffle sync") as tracker:
         assert isinstance(tracker, progress.LiveTracker)
 

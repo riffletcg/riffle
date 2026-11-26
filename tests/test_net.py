@@ -3,13 +3,13 @@
 import gzip
 import http.client
 import io
-import socket
 import urllib.error
 from datetime import UTC, datetime
 
 import pytest
 
 from riffle import net
+from tests.conftest import network
 
 
 class Resp(io.BytesIO):
@@ -260,17 +260,9 @@ def test_a_retry_after_that_isnt_a_wait_in_seconds_gets_the_backoff(server, valu
 
 
 def test_the_network_is_up_when_any_host_answers(monkeypatch):
-    tried = []
-
-    def create_connection(address, timeout):
-        tried.append(address[0])
-        if address[0] == "api.scryfall.com":
-            raise socket.gaierror(8, "nodename nor servname provided, or not known")
-        return socket.socket()
-
-    monkeypatch.setattr(net.socket, "create_connection", create_connection)
+    tried = network(monkeypatch, up_after=0, down=("api.scryfall.com",))
     assert net.wait_online("api.scryfall.com", "mtgjson.com", "tcgcsv.com") is not None
-    assert tried == ["api.scryfall.com", "mtgjson.com"]
+    assert [host for host, _v in tried] == ["api.scryfall.com", "mtgjson.com"]
 
 
 # ---- fetch_new: a list that may be one already kept --------------------------------------------

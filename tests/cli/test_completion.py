@@ -1,11 +1,10 @@
 """Tab completion as zsh asks for it: deck names from the vault, option values from their lists."""
 
 import pytest
-from typer.testing import CliRunner
 
 import riffle.ingest.mtgo.pages as ingest_mtgo_pages
-from riffle.cli import app
 from riffle.export import formats
+from tests.conftest import invoke
 
 DECK = "---\ngame: mtg\nformat: commander\n---\n\n## Moxfield import\n\n```\n1 Sol Ring\n```\n"
 
@@ -13,7 +12,7 @@ DECK = "---\ngame: mtg\nformat: commander\n---\n\n## Moxfield import\n\n```\n1 S
 def offered(line: str) -> list[str] | None:
     """What zsh is offered for a command line typed up to the cursor; None means file names."""
     env = {"_RIFFLE_COMPLETE": "complete_zsh", "_TYPER_COMPLETE_ARGS": line}
-    out = CliRunner().invoke(app, [], env=env, prog_name="riffle").output.strip()
+    out = invoke(env=env, prog_name="riffle").output.strip()
     if out == "_files":
         return None
     head, tail = "_arguments '*: :((", "))'"
@@ -22,10 +21,8 @@ def offered(line: str) -> list[str] | None:
 
 
 @pytest.fixture
-def vault(tmp_path, monkeypatch):
-    """Three deck notes, a note that isn't a deck, and a generated note, in the default vault."""
-    monkeypatch.setenv("HOME", str(tmp_path))
-    mtg = tmp_path / "vault" / "games" / "tcg" / "mtg"
+def vault(mtg):
+    """Three deck notes, a note that isn't a deck, and a generated note, in the test config's vault."""
     for rel, text in {
         "commander/simic-aesi-lands.md": DECK,
         "commander/selesnya-emmara-tokens.md": DECK,

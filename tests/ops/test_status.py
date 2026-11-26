@@ -1,24 +1,23 @@
 """`riffle status`: each source's days as a strip, gaps marked, then the backlog, jobs, disk and backup."""
 
-import gzip
 import json
 import re
 import subprocess
 import sys
 from collections import Counter
 from datetime import UTC, date, datetime, time, timedelta
+from functools import partial
 from pathlib import Path
 
 import pytest
-from typer.testing import CliRunner
 
 import riffle.ingest.mtgo.storage as ingest_mtgo_storage
 import riffle.ingest.mtgo.trickle as ingest_mtgo_trickle
 from riffle import trickle
-from riffle.cli import app
 from riffle.config import config_path, data_dir
-from riffle.ingest.remote import pricelists
 from riffle.ops import checks, schedule, status
+from tests.conftest import invoke
+from tests.ops.conftest import POSTGRES, job_log, kept_singles, never, no_launchctl, sync_run
 
 D = [date(2026, 9, 28 + k) for k in range(3)] + [date(2026, 10, k) for k in range(1, 4)]
 NOW = datetime(2026, 10, 3, 8, 30, tzinfo=UTC)
@@ -168,19 +167,14 @@ def test_each_job_loaded_and_how_its_last_run_ended():
 
 
 def test_jobs_that_can_t_be_asked_about_say_so():
-    def no_launchctl(job: schedule.Job) -> schedule.Status:
-        raise FileNotFoundError("launchctl")
-
     assert status.jobs_lines(no_launchctl) == ["unknown (launchctl)"]
 
 
 # ---- what the job logs say ----------------------------------------------------------------------
 
 RAN = schedule.Status(True, True, last_exit="0")
-POSTGRES = (
-    "can't reach Postgres at postgresql+psycopg://tcg@localhost:5432/tcg: connection refused"
-    " — start it with: riffle db up"
-)
+# the sync's runs from this file's own first day, ten days before NOW
+recent_sync_run = partial(sync_run, first=datetime(2026, 9, 23, 13, 2, 3, tzinfo=UTC))
 MANAPOOL_FAILED = (
     "2026-10-02 02:08:10 UTC  riffle watch manapool\n"
     "02:17:40  ! Mana Pool variants: HTTP 503\n"
@@ -192,25 +186,6 @@ MANAPOOL_FAILED = (
     "2 steps failed: Mana Pool singles, Mana Pool sealed\n"
     "05:17:46  exited 1 after 9m 36s\n"
 )
-
-
-def job_log(job: schedule.Job, text: str) -> Path:
-    path = schedule.log_path(job)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(text)
-    return path
-
-
-def sync_run(k: int, code: int | None = 1) -> str:
-    """Run k of the sync's twice-daily runs from 2026-09-23 13:02:03 UTC, as its log has it: the
-    header, the Postgres error unless it exited 0, and the closing line unless code is None."""
-    started = datetime(2026, 9, 23, 13, 2, 3, tzinfo=UTC) + timedelta(days=k // 2, hours=9 * (k % 2))
-    lines = [f"{started:%Y-%m-%d %H:%M:%S} UTC  riffle sync"]
-    if code != 0:
-        lines.append(POSTGRES)
-    if code is not None:
-        lines.append(f"{started + timedelta(seconds=1):%H:%M:%S}  exited {code} after 1.2s")
-    return "".join(f"{line}\n" for line in lines)
 
 
 def runs_every(title: str, counts: dict[date, int], every: timedelta = timedelta(minutes=5)) -> str:
@@ -225,19 +200,19 @@ def runs_every(title: str, counts: dict[date, int], every: timedelta = timedelta
 
 
 def test_the_sync_s_last_failed_run_is_named_until_a_run_passes(on_a_terminal):
-    job_log(schedule.SYNC, "".join(sync_run(k) for k in range(10)))
+    job_log(schedule.SYNC, "".join(recent_sync_run(k) for k in range(10)))
     failing = schedule.Status(True, True, last_exit="1")
     assert status.jobs_lines(jobs(sync=failing), now=NOW) == [
         f"1 of 1 loaded; the sync's last run failed 2026-09-27 16:02 MDT, the 10th in a row: {POSTGRES}"
     ]
-    job_log(schedule.SYNC, "".join(sync_run(k) for k in range(10)) + sync_run(10, None))
+    job_log(schedule.SYNC, "".join(recent_sync_run(k) for k in range(10)) + recent_sync_run(10, None))
     # a run killed changes nothing
     assert "the 10th in a row" in status.jobs_lines(jobs(sync=failing), now=NOW)[0]
-    job_log(schedule.SYNC, sync_run(9))
+    job_log(schedule.SYNC, recent_sync_run(9))
     assert status.jobs_lines(jobs(sync=failing), now=NOW) == [
         f"1 of 1 loaded; the sync's last run failed 2026-09-27 16:02 MDT: {POSTGRES}"
     ]
-    job_log(schedule.SYNC, "".join(sync_run(k) for k in range(10)) + sync_run(10, 0))
+    job_log(schedule.SYNC, "".join(recent_sync_run(k) for k in range(10)) + recent_sync_run(10, 0))
     assert status.jobs_lines(jobs(sync=RAN), now=NOW) == ["1 of 1 loaded; every last run exited 0"]
 
 
@@ -357,14 +332,9 @@ def test_whether_time_machine_has_a_destination():
     assert status.backup_line(one, log=None) == "Time Machine to Backup Disk"  # no backup_log set
 
 
-def never(args, **_):
-    raise AssertionError("tmutil asked")
-
-
-def backup_log(home: Path, monkeypatch, lines: str | None, failed: str | None = None) -> Path:
+def backup_log(lines: str | None, failed: str | None = None) -> Path:
     """The backup job's log under the home folder, and backup.failed beside it when given."""
-    monkeypatch.setenv("HOME", str(home))
-    path = home / ".local" / "state" / "backup" / "backup.log"
+    path = Path.home() / ".local" / "state" / "backup" / "backup.log"
     path.parent.mkdir(parents=True)
     if lines is not None:
         path.write_text(lines)
@@ -373,10 +343,8 @@ def backup_log(home: Path, monkeypatch, lines: str | None, failed: str | None = 
     return path
 
 
-def test_the_last_backup_and_check_that_went_well_from_the_backup_log(tmp_path, monkeypatch):
+def test_the_last_backup_and_check_that_went_well_from_the_backup_log():
     log = backup_log(
-        tmp_path,
-        monkeypatch,
         "2026-09-28T08:33:10Z check ok\n2026-10-01T08:31:02Z backup ok\n2026-10-02T08:31:34Z backup ok\n",
     )
     assert status.backup_line(never, log=log) == (
@@ -412,26 +380,24 @@ def test_the_last_backup_and_check_that_went_well_from_the_backup_log(tmp_path, 
         ("2026-10-11T08:31:00Z backup ok\n", "backup\n", "failed: backup"),
     ],
 )
-def test_a_backup_failing_since_the_last_that_went_well(tmp_path, monkeypatch, lines, failed, said):
-    log = backup_log(tmp_path, monkeypatch, lines, failed)
+def test_a_backup_failing_since_the_last_that_went_well(lines, failed, said):
+    log = backup_log(lines, failed)
     assert status.backup_line(never, log=log) == f"{said} (~/.local/state/backup/backup.log)"
 
 
 @pytest.mark.parametrize("lines", [None, "", "2026-10-12T21:40:12Z backup failed\n"])
-def test_no_backup_found_without_a_log_or_a_backup_that_went_well(tmp_path, monkeypatch, lines):
-    log = backup_log(tmp_path, monkeypatch, lines)
+def test_no_backup_found_without_a_log_or_a_backup_that_went_well(lines):
+    log = backup_log(lines)
     assert status.backup_line(never, log=log) == "none found at ~/.local/state/backup/backup.log"
 
 
-def test_a_backup_log_that_can_t_be_read_says_so(tmp_path, monkeypatch, unreadable):
-    log = unreadable(backup_log(tmp_path, monkeypatch, "2026-10-02T08:31:34Z backup ok\n"))
+def test_a_backup_log_that_can_t_be_read_says_so(unreadable):
+    log = unreadable(backup_log("2026-10-02T08:31:34Z backup ok\n"))
     assert re.fullmatch(r"unknown \(.*Permission denied.*\)", status.backup_line(never, log=log))
 
 
-def test_backup_log_lines_that_aren_t_a_step_s_are_passed_over(tmp_path, monkeypatch):
+def test_backup_log_lines_that_aren_t_a_step_s_are_passed_over():
     log = backup_log(
-        tmp_path,
-        monkeypatch,
         "repository opened\n2026-13-45T08:31:34Z backup ok\n2026-10-02T08:31:34Z backup ok\n",
     )
     assert status.backup_line(never, log=log) == (
@@ -444,17 +410,9 @@ def test_a_config_that_can_t_be_read_names_no_backup_log():
     assert status._backup_log() is None
 
 
-def quiet(monkeypatch):
-    """The jobs and backup lines without asking this machine, the jobs' as on a Mac."""
-    monkeypatch.setattr(sys, "platform", "darwin")
-    monkeypatch.setattr(status, "jobs_lines", lambda *_, **__: ["9 of 9 loaded; every last run exited 0"])
-    monkeypatch.setattr(status, "backup_line", lambda *_, **__: "Time Machine to Backup Disk")
-    monkeypatch.setattr(status.times, "now", lambda: NOW)
-
-
-def test_the_command_over_an_empty_store(monkeypatch):
-    quiet(monkeypatch)
-    result = CliRunner().invoke(app, ["status", "--days", "3"])
+def test_the_command_over_an_empty_store(quiet):
+    quiet(NOW)
+    result = invoke("status", "--days", "3")
     assert result.exit_code == 0, result.output
     lines = result.output.splitlines()
     assert lines[0] == "riffle status · 2026-10-03 08:30 UTC · the last 3 days, each source by its own clock"
@@ -470,14 +428,14 @@ def test_the_command_over_an_empty_store(monkeypatch):
     ]
 
 
-def test_a_source_that_can_t_be_read_fails_the_command(monkeypatch):
-    quiet(monkeypatch)
+def test_a_source_that_can_t_be_read_fails_the_command(quiet, monkeypatch):
+    quiet(NOW)
 
     def broken() -> checks.Report:
         raise ValueError("not JSON")
 
     monkeypatch.setitem(checks.CHECKS, "Scryfall", broken)
-    result = CliRunner().invoke(app, ["status"])
+    result = invoke("status")
     assert result.exit_code == 1
     assert "Scryfall      unreadable (not JSON)" in result.output.splitlines()
     assert "the last 14 days" in result.output
@@ -487,17 +445,7 @@ def test_a_store_with_nothing_kept_yet(tmp_path):
     assert status.store_line(tmp_path / "riffle") == f"nothing kept yet in {tmp_path / 'riffle'}"
 
 
-def kept_singles(day: str) -> None:
-    """Card Kingdom's singles kept whole under a day: made at 13:08 Pacific, fetched 43 minutes on."""
-    made = datetime.fromisoformat(f"{day}T13:08:38").replace(tzinfo=pricelists.PACIFIC)
-    path = data_dir() / "cardkingdom" / "daily" / day / "singles.json.gz"
-    path.parent.mkdir(parents=True, exist_ok=True)
-    body = json.dumps({"meta": {"created_at": f"{day} 13:08:38"}, "data": [{"id": 1}]}).encode()
-    path.write_bytes(gzip.compress(body, mtime=int((made + timedelta(minutes=43)).timestamp())))
-
-
-def test_the_command_says_what_each_source_the_jobs_and_the_store_hold(tmp_path, monkeypatch):
-    monkeypatch.setenv("HOME", str(tmp_path))
+def test_the_command_says_what_each_source_the_jobs_and_the_store_hold(monkeypatch):
     monkeypatch.setattr(sys, "platform", "darwin")  # the jobs as launchd has them, on any runner
     monkeypatch.setattr(status.times, "now", lambda: NOW)
     monkeypatch.setattr(
@@ -509,7 +457,7 @@ def test_the_command_says_what_each_source_the_jobs_and_the_store_hold(tmp_path,
     )
     kept_singles("2026-10-01")
     kept_singles("2026-10-03")
-    job_log(schedule.SYNC, sync_run(10, 0))
+    job_log(schedule.SYNC, recent_sync_run(10, 0))
     job_log(schedule.watch_job("manapool"), MANAPOOL_FAILED)
     (data_dir() / "disk.jsonl").write_text(
         "".join(
@@ -522,8 +470,8 @@ def test_the_command_says_what_each_source_the_jobs_and_the_store_hold(tmp_path,
     (data_dir() / "pad").write_bytes(b"x" * 99_000)
     with config_path().open("a") as f:
         f.write('backup_log = "~/.local/state/backup/backup.log"\n')
-    backup_log(tmp_path, monkeypatch, "2026-10-02T08:31:34Z backup ok\n")
-    result = CliRunner().invoke(app, ["status", "--days", "3"])
+    backup_log("2026-10-02T08:31:34Z backup ok\n")
+    result = invoke("status", "--days", "3")
     assert result.exit_code == 0, result.output
     lines = re.sub(r"\x1b\[[0-9;]*m", "", result.output).splitlines()
     assert "Card Kingdom   ⣿  ✗  ⣿   2 lists" in lines

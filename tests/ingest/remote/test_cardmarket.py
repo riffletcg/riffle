@@ -11,6 +11,7 @@ import pytest
 from riffle import locks, net, runs
 from riffle.ingest.remote import cardmarket
 from riffle.watch import watching
+from tests.ingest.remote.conftest import Source
 
 B = cardmarket.BASE
 STAMP = "2026-09-27T02:45:12+0200"
@@ -23,39 +24,6 @@ def guide(stamp: str = STAMP, products: int = 2, price: float = 1.5) -> bytes:
         for n in range(products)
     ]
     return json.dumps({"version": 1, "createdAt": stamp, "priceGuides": rows}).encode()
-
-
-class Source:
-    """Cardmarket as net.fetch_new: url -> body, None (missing), or an exception to raise, each
-    body's ETag its hash. Records every (url, ETag sent) and the missing codes asked with."""
-
-    def __init__(self, answers: dict[str, bytes | None | Exception]):
-        self.answers = answers
-        self.asked: list[tuple[str, str | None]] = []
-        self.missing: set = set()
-        self.tag_new, self.tag_known = True, False
-
-    def fetch(self, url, dest, known, etag=None, accept="*/*", progress=None, missing=(404,)):
-        self.asked.append((url, etag))
-        self.missing.add(missing)
-        body = self.answers.get(url)
-        if isinstance(body, Exception):
-            raise body
-        if body is None:
-            return None
-        tag = f'"{hash(body)}"'
-        if etag == tag:
-            return net.Fetched("unchanged", b"", etag)
-        head = body[: net.HEAD]
-        if known(head):
-            return net.Fetched("known", head, tag if self.tag_known else None)
-        dest.write_bytes(body)
-        if progress:
-            progress(len(body), None)
-        return net.Fetched("new", head, tag if self.tag_new else None, len(body))
-
-    def urls(self) -> list[str]:
-        return [u for u, _ in self.asked]
 
 
 def url(gid: int | str) -> str:
@@ -71,10 +39,9 @@ def every(stamp: str = STAMP, **overrides) -> dict[str, bytes | None | Exception
 
 
 @pytest.fixture
-def data_dir(tmp_path, monkeypatch):
-    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path))
+def data_dir(data_dir, monkeypatch):
     monkeypatch.setattr(cardmarket, "KINDS", ())  # the product lists' tests set them back
-    return tmp_path / "riffle" / "cardmarket"
+    return data_dir / "cardmarket"
 
 
 @pytest.fixture
@@ -92,7 +59,7 @@ def few(monkeypatch, no_look):
 
 def run(source: Source, tracker=None, now: datetime = NOW, always: bool = True) -> watching.Watch:
     kw = {} if tracker is None else {"tracker": tracker}
-    return cardmarket.watch(fetch=source.fetch, clock=lambda: now, always=always, **kw)
+    return cardmarket.watch(fetch=source.fetch_new, clock=lambda: now, always=always, **kw)
 
 
 def logged(data_dir) -> list[dict]:
@@ -130,7 +97,7 @@ def test_a_guide_not_new_costs_a_304_with_the_etag_last_kept(data_dir, few, trac
     run(Source(every()))
     source = Source(every())
     res = run(source, tracker, now=NOW + timedelta(hours=1))
-    assert all(tag is not None for _, tag in source.asked)
+    assert all(tag is not None for _, tag in source.sent)
     assert len(res.same) == 4 and not res.kept
     assert tracker.outcomes()["Cardmarket fab"] == ("ok", "no new guide since the last one kept")
     assert [e["result"] for e in logged(data_dir)][4:] == ["unchanged"] * 4
@@ -244,7 +211,7 @@ def test_a_game_with_no_guide_warns_after_seven_times_in_a_row(data_dir, few, tr
         run(Source(every(**{url(16): None, url(3): None})), now=NOW + timedelta(days=n))
     source = Source(every(**{url(16): None, url(3): None}))
     run(source, tracker, now=NOW + timedelta(days=6))
-    assert url(3) in source.urls() and url(16) in source.urls()
+    assert url(3) in source.asked and url(16) in source.asked
     assert tracker.outcomes()["Cardmarket yugioh"] == (
         "warn",
         "no guide since 2026-09-27 (7 runs in a row); asked again every run",
@@ -264,7 +231,7 @@ def test_a_guide_with_no_rows_is_kept_nowhere_played_or_not(data_dir, few, track
     assert cardmarket.made("mtg") == [] and cardmarket.made("pokemon") == []
     source = Source(every())
     run(source, now=NOW + timedelta(hours=1))
-    assert dict(source.asked)[url(1)] is None  # no ETag kept for it: asked whole again
+    assert dict(source.sent)[url(1)] is None  # no ETag kept for it: asked whole again
 
 
 def test_a_game_that_fails_keeps_nothing_and_the_rest_carry_on(data_dir, few, tracker):
@@ -327,7 +294,7 @@ def test_a_createdat_that_isnt_a_time_is_not_a_guide_kept(data_dir):
 def test_no_answer_from_cardmarket_fails_the_rest_without_asking(data_dir, few, tracker):
     source = Source(every(**{url(1): net.NoAnswer("no answer after 3 tries (timed out)")}))
     res = run(source, tracker)
-    assert source.urls() == [url(1)]
+    assert source.asked == [url(1)]
     assert res.failed == [
         ("Cardmarket mtg", "no answer after 3 tries (timed out)"),
         ("Cardmarket fab", "not asked: Cardmarket gave no answer"),
@@ -392,7 +359,7 @@ def test_a_guide_sent_without_an_etag_is_asked_whole_next_time_and_known_by_its_
     source = Source(every())
     source.tag_known = True
     res = run(source, now=NOW + timedelta(hours=1))
-    assert len(res.same) == 4 and all(tag is None for _, tag in source.asked)
+    assert len(res.same) == 4 and all(tag is None for _, tag in source.sent)
     assert set(json.loads((data_dir / "watch-etags.json").read_text())) == {"mtg", "fab", "pokemon", "yugioh"}
 
 
@@ -430,7 +397,7 @@ def test_a_look_finds_a_game_cardmarket_added_names_it_and_keeps_its_guide(data_
     res = run(source, tracker)
     assert tracker.outcomes()["Cardmarket new games"] == ("ok", "found cyberpunk (5); asked 2, 4-8")
     assert res.kept == ["Cardmarket mtg", "Cardmarket pokemon", "Cardmarket cyberpunk"] and not res.failed
-    assert source.urls() == [
+    assert source.asked == [
         url(1),
         url(3),
         url(2),
@@ -466,8 +433,8 @@ def test_a_learned_game_is_asked_like_the_rest_and_no_run_looks_again_the_same_d
     run(Source(added()))
     source = Source(added())
     res = run(source, tracker, now=NOW + timedelta(hours=1))
-    assert source.urls() == [url(1), url(5), url(3)]  # the games by name, cyberpunk among them
-    assert len(res.same) == 3 and all(tag is not None for _, tag in source.asked)
+    assert source.asked == [url(1), url(5), url(3)]  # the games by name, cyberpunk among them
+    assert len(res.same) == 3 and all(tag is not None for _, tag in source.sent)
     assert "Cardmarket new games" not in tracker.outcomes()
 
 
@@ -481,7 +448,7 @@ def test_a_new_cardmarket_day_brings_one_look_past_the_games_learned(data_dir, t
     assert list(saved(data_dir)["games"]) == ["cyberpunk"]
     source = Source(added(later))
     run(source, now=NOW + timedelta(days=1, hours=1))
-    assert source.urls() == [url(1), url(5), url(3)]
+    assert source.asked == [url(1), url(5), url(3)]
 
 
 def test_a_look_cardmarket_doesnt_answer_saves_nothing_and_the_next_run_looks_again(data_dir, two, tracker):
@@ -506,7 +473,7 @@ def test_a_look_cardmarket_doesnt_answer_saves_nothing_and_the_next_run_looks_ag
 def test_no_run_looks_once_cardmarket_gave_no_answer(data_dir, two, tracker):
     source = Source(added(**{url(1): net.NoAnswer("no answer after 3 tries (timed out)")}))
     run(source, tracker)
-    assert source.urls() == [url(1)] and "Cardmarket new games" not in tracker.outcomes()
+    assert source.asked == [url(1)] and "Cardmarket new games" not in tracker.outcomes()
 
 
 @pytest.mark.parametrize(
@@ -537,7 +504,7 @@ def test_an_answer_that_isnt_a_guide_is_no_game(data_dir, two, tracker):
         "warn",
         "no new game; asked 2, 4-8; game 5 answered with something not a price guide",
     )
-    assert plist(5) not in source.urls() and len(res.kept) == 2
+    assert plist(5) not in source.asked and len(res.kept) == 2
     assert saved(data_dir)["games"] == {}
 
 
@@ -639,11 +606,11 @@ def test_a_product_list_never_served_is_asked_again_only_at_the_look(lists, trac
     )
     source = Source(answers)
     run(source, now=NOW + timedelta(minutes=5))
-    assert listed_url(6, "nonsingles") not in source.urls()  # not at every run
+    assert listed_url(6, "nonsingles") not in source.asked  # not at every run
     monkeypatch.setattr(cardmarket, "_looked", lambda fetch, tracker, now: {})  # a new Cardmarket day
     source = Source(with_products())
     res = run(source, now=NOW + timedelta(minutes=10))
-    assert listed_url(6, "nonsingles") in source.urls() and "Cardmarket pokemon nonsingles" in res.kept
+    assert listed_url(6, "nonsingles") in source.asked and "Cardmarket pokemon nonsingles" in res.kept
 
 
 def test_a_product_list_that_stops_is_noted_and_fails_a_played_game(lists, tracker):

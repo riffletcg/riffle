@@ -8,11 +8,8 @@ from pathlib import Path
 import pytest
 
 from riffle.ops import joblogs
+from tests.ops.conftest import POSTGRES, sync_run
 
-POSTGRES = (
-    "can't reach Postgres at postgresql+psycopg://tcg@localhost:5432/tcg: connection refused"
-    " — start it with: riffle db up"
-)
 MANAPOOL = (
     "2026-10-19 01:26:10 UTC  riffle watch manapool\n"
     "01:35:40  ! Mana Pool singles: download interrupted after 25,615 bytes (The read operation timed out)\n"
@@ -30,18 +27,6 @@ def write(folder: Path, text: str) -> Path:
     path = folder / "sync.log"
     path.write_text(text)
     return path
-
-
-def sync_run(k: int, code: int | None = 1) -> str:
-    """Run k of the sync's twice-daily runs from 2026-10-13 13:02:03 UTC, as its log has it: the
-    header, the Postgres error unless it exited 0, and the closing line unless code is None."""
-    started = datetime(2026, 10, 13, 13, 2, 3, tzinfo=UTC) + timedelta(days=k // 2, hours=9 * (k % 2))
-    lines = [f"{started:%Y-%m-%d %H:%M:%S} UTC  riffle sync"]
-    if code != 0:
-        lines.append(POSTGRES)
-    if code is not None:
-        lines.append(f"{started + timedelta(seconds=1):%H:%M:%S}  exited {code} after 1.2s")
-    return "".join(f"{line}\n" for line in lines)
 
 
 def at(day: date, *parts: int) -> datetime:
