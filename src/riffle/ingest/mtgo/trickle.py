@@ -16,42 +16,26 @@ from riffle.ingest.mtgo import storage as storage_mod
 from riffle.models.metagame import Event
 from riffle.progress import SILENT, Tracker
 
+# mtgo.com builds a page when it's first asked for. A build that takes more than about
+# 30 seconds answers with a page without lists, or a redirect to /decklists, and the page
+# is ready for the next request, for under an hour. So a page that fails is asked again
+# at each of the next two runs (riffle.trickle's rounds), an index that lists nothing is
+# a failed try like any other, and only a 429, a 403 or a Retry-After pauses the job.
+# An empty answer on a retry in its round is believed only when a page fetched whole in
+# the last half hour (the canary) comes back whole again.
+
 SOURCE = "mtgo"
-
-
-PENDING_DAYS = 3
-
-
-NEW_MONTH_DAYS = 2
-
-
-REREAD = timedelta(hours=1)
-
-
-RECENT_MONTH = timedelta(days=7)
-
-
-SWEEP_END = 3
-
-
-EMPTY_DAYS = 3
-
-
-PROBE = timedelta(days=7)
-
-
-CANARY_AGE = timedelta(minutes=30)
-
-
-GAP = 5.0
-
-
-TIMEOUT = 60.0
-
-
-WHOLE = ("whole", "canary whole")
-
-
+PENDING_DAYS = 3  # an empty page for an event younger than this is waiting for its lists
+NEW_MONTH_DAYS = 2  # only a month this new may list no events
+REREAD = timedelta(hours=1)  # how often the current month's index is read again
+RECENT_MONTH = timedelta(days=7)  # a month that ended this recently is read as often
+SWEEP_END = 3  # months in a row listing no events end the sweep back through the indexes,
+EMPTY_DAYS = 3  # once each has listed nothing on this many different days
+PROBE = timedelta(days=7)  # after that, the next older month is still asked this often
+CANARY_AGE = timedelta(minutes=30)  # a canary is a page fetched whole this recently
+GAP = 5.0  # seconds between requests in a run
+TIMEOUT = 60.0  # seconds, any page: an old month's index, like a league, runs to 300 KB and comes slowly
+WHOLE = ("whole", "canary whole")  # the request log's verdicts for an answer with its lists
 EPOCH = datetime(1970, 1, 1, tzinfo=UTC)
 
 
@@ -369,7 +353,7 @@ class TrickleResult:
     forgotten: list[str] = field(default_factory=list)  # months saved as empty, to be read again
     owed: int = 0
     due: int = 0
-    waiting: int = 0
+    waiting: int = 0  # owed, too young to ask
 
 
 class _Stop(Exception):
@@ -713,7 +697,7 @@ class TrickleStatus:
     months: dict[str, dict]
     sweep_done: bool
     ages: dict[str, float] = field(default_factory=dict)  # by kind, hours: see ages_path
-    waiting: int = 0
+    waiting: int = 0  # owed, too young to ask
 
 
 def status(clock: Callable[[], datetime] = trickle.now) -> TrickleStatus:

@@ -1,5 +1,5 @@
 """Every ManaBox export kept as the file it was, the change between two of them, and the
-collection written fresh so an older export put back by hand stays the collection (C33)."""
+collection written fresh so an older export put back by hand stays the collection."""
 
 import csv
 import dataclasses
@@ -574,7 +574,7 @@ class Home:
         return write_export(self.downloads / name, rows, when, columns)
 
     def collect(self, rows, when, columns=COLUMNS):
-        """The collection as a sync before this patch left it: the export's bytes and its time."""
+        """The collection as a sync left it before exports were kept: the export's bytes and its time."""
         return write_export(self.collection, rows, when, columns)
 
     def fixes(self, when):

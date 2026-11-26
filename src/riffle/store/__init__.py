@@ -14,7 +14,7 @@ from riffle.models import CardRules, CardView, PricedPrinting, Prices, Printing
 
 class Catalog(Protocol):
     def resolve(self, name: str) -> str | None:
-        """Card name (full, front face, or safe name as export.links writes it; any case) -> card_id."""
+        """Card name (full, front face, or safe name as riffle.links writes it; any case) -> card_id."""
 
     def name(self, card_id: str) -> str: ...
 

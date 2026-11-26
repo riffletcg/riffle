@@ -72,7 +72,7 @@ def test_stub_with_empty_list_is_not_a_deck(tmp_path):
 
 
 def test_the_walk_never_enters_riffle_s_folders(tmp_path, monkeypatch):
-    """S4: listing the deck notes walked _generated/ and _log/ too, thousands of files, and
+    """Listing the deck notes walked _generated/ and _log/ too, thousands of files, and
     threw them away; sync --watch did it every 5 seconds."""
     import os
 

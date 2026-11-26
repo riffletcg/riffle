@@ -42,12 +42,16 @@ def install(
     path: Path | None = None,
     job: jobs.Job = jobs.SYNC,
 ) -> Path:
+    """Write the plist and (re)load it, or on Linux the job's systemd units. Replaces any
+    existing job. An interval job takes no times."""
     if backend() == "systemd":
         return systemd.install(times, exe=exe, run=run, job=job)
     return launchd.install(times, exe=exe, run=run, job=job, path=path)
 
 
 def remove(run: jobs.Runner = jobs._run, path: Path | None = None, job: jobs.Job = jobs.SYNC) -> bool:
+    """Unload and delete, the plist or on Linux the job's systemd units. True if there was
+    anything to remove."""
     if backend() == "systemd":
         return systemd.remove(run=run, job=job)
     return launchd.remove(run=run, job=job, path=path)

@@ -887,7 +887,7 @@ def test_riffle_status_shows_the_db_backup_line_under_its_label_after_backup(qui
     assert lines[-1] == "db backup     none yet: riffle db backup makes one, and each sync after it"
 
 
-# ---- done when: a dump restores into a scratch database with the same counts ------------------
+# ---- a dump restores into a scratch database with the same counts -----------------------------
 
 TABLES = (
     "games",

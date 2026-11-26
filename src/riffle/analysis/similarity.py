@@ -4,9 +4,9 @@ Each zone of a list (the main deck, the sideboard) is compared on its own as cop
 card, basic lands aside, each card by its catalog name when it resolves, so a double-faced card
 written by its front face and by its whole name is one card. The whole list is never measured
 as one: cards moved between zones would cancel. Swaps and Jaccard are metrics; containment says
-how much of one zone is in the other, and isn't one (a zone inside a larger one scores 1). The
-proofs are in the vault's plan note, deck-similarity-commands; the 20-swap line comes from its
-deck-similarity analysis, MTGO Duel Commander players' own lists against different commanders.
+how much of one zone is in the other, and isn't one (a zone inside a larger one scores 1):
+tests/analysis/test_similarity.py checks each on random zones. The 20-swap line was measured on
+MTGO Duel Commander players' own lists against different commanders.
 """
 
 import unicodedata
@@ -17,7 +17,7 @@ from riffle.models import Deck
 from riffle.store import Catalog
 
 # A list this close to a deck's main list under the same commander is a variant of it; further,
-# another deck. Under another commander the line is the vault's of 2026-10-05.
+# another deck. Under another commander the line is tighter.
 VARIANT_SWAPS = 20
 OTHER_COMMANDER_SWAPS = 10
 # Where the lines were measured: Commander and Duel Commander lists.

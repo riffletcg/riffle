@@ -4,7 +4,7 @@ Riffle keeps everything it fetches and deletes nothing, so its data folder only 
 1.4 GB a day once every Scryfall file is kept. Each online sync records the disk's free space
 in <data_dir>/disk.jsonl, and warns when it's under WARN_BELOW or when the days left at the
 rate free space fell over the last week are under WARN_DAYS: the disk fills from anything on
-the Mac, not only Riffle, and a watch cut off mid-write loses a price day for good.
+the machine, not only Riffle, and a watch cut off mid-write loses a price day for good.
 """
 
 import json

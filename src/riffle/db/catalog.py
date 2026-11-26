@@ -1,7 +1,7 @@
 """Loading one game's catalog into Postgres: stage everything, then merge, in one transaction.
 
-A source's loader (riffle.ingest.scryfall_catalog for Magic) turns what the
-source lists into a Batch: sets, cards, printings, legalities, and other
+A source's loader (riffle.ingest.remote.scryfall_catalog for Magic) turns what
+the source lists into a Batch: sets, cards, printings, legalities, and other
 sources' IDs for printings, each row named by its ref, the creating source's
 own ID for it. load() then
 

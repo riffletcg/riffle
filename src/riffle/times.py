@@ -2,7 +2,7 @@
 
 Everything Riffle writes to disk is UTC: its files, its logs, and the dates in its notes. What
 it prints to a terminal is local time, with the zone. A source's data is dated by the source's
-own clock, never the Mac's, and a price day is never converted.
+own clock, never this machine's, and a price day is never converted.
 """
 
 import sys
@@ -21,7 +21,7 @@ def today() -> date:
 
 
 def local(t: datetime, fmt: str = MINUTE) -> str:
-    """t in the Mac's time, with the zone's name: 2026-09-28 05:00 MDT."""
+    """t in this machine's time, with the zone's name: 2026-09-28 05:00 MDT."""
     t = t.astimezone()
     return f"{t.strftime(fmt)} {t.tzname()}"
 

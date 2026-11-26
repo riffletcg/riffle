@@ -31,8 +31,8 @@ class Inventory:
 
 def inventory(collection_csv: Path, catalog: Catalog, boxes: precons.Boxes | None = None) -> Inventory:
     """The collection as the export records it, each copy a precon box's printing was misread
-    from read as that printing (riffle.ingest.precons). manabox.NotExport for a file that isn't
-    an export."""
+    from read as that printing (riffle.ingest.local.precons). manabox.NotExport for a file that
+    isn't an export."""
     holdings = manabox.load(collection_csv) if collection_csv.exists() else []
     unresolved = resolve_holdings(holdings, catalog)
     if not (boxes and boxes.boxes):

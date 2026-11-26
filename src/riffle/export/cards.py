@@ -6,7 +6,7 @@ In the notes folder (config's notes):
                                           its pages, its text, price, legality and copies owned
     mtg/_generated/cards/img/<id>.jpg     its pictures, kept with card_images = "cache"
 
-A card's note is named by its safe name (export/links.py), so a link in that form resolves with
+A card's note is named by its safe name (riffle.links), so a link in that form resolves with
 no change to any list, and the lists that run a card are its note's backlinks. Obsidian's page
 preview shows a note when its link is hovered. Each note is written whole, only when it changed;
 a card no note links any more loses its note, and a picture no note shows is removed.

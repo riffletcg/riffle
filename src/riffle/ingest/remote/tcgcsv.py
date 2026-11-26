@@ -70,7 +70,7 @@ kept under the day's stamp once none of its sets is due; one a day left unfinish
 as it stood at the next day's run. A set gone from the set list is in the lists before.
 
 Every request is counted under its UTC day in <data_dir>/tcgcsv/requests.json, by every run,
-and no day asks for more than DAILY_REQUESTS (C13). Prices come first: products ask only
+and no day asks for more than DAILY_REQUESTS. Prices come first: products ask only
 what the day leaves, and while the day's prices are still to come, they leave room for them.
 """
 
@@ -102,7 +102,7 @@ DAILY_REQUESTS = 9_000  # tcgcsv asks for under 10,000 a day; games past this wa
 OVER_BUDGET = "past the day's request budget; the next day's run gets it"
 NO_ANSWER = "not asked: tcgcsv gave no answer"
 NEXT_REFRESH = timedelta(hours=1)  # a file this far past its day's stamp came from the next refresh
-PRICES, PART, MISSING = "prices.jsonl.gz", "prices.jsonl.part", "missing.txt"  # PRICES: before 0033
+PRICES, PART, MISSING = "prices.jsonl.gz", "prices.jsonl.part", "missing.txt"  # PRICES: before 2026-09-29
 KEPT = "kept.json"
 CHECKED, DAY, PRODUCTS = "last-updated", "day", "products"  # the watch log's kinds of entry
 PRODUCTS_PART, PRODUCTS_KEPT = "products.jsonl.part", "products.json"
@@ -231,7 +231,7 @@ def _requests() -> dict[str, dict[str, int]]:
 
 def _counted(fetch: Fetch, clock: Callable[[], datetime]) -> Fetch:
     """fetch, each request first counted under its UTC day in requests.json, so every run of
-    the day sees it (C13)."""
+    the day sees it."""
 
     def ask(url: str) -> net.Reply | None:
         found = _requests()
@@ -246,7 +246,7 @@ def _counted(fetch: Fetch, clock: Callable[[], datetime]) -> Fetch:
 
 
 def finished(game_dir: Path) -> bool:
-    """Whether a game's day is finished: kept in its runs, or gzipped before 0033."""
+    """Whether a game's day is finished: kept in its runs, or gzipped before 2026-09-29."""
     return (game_dir / KEPT).exists() or (game_dir / PRICES).exists()
 
 

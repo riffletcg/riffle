@@ -38,10 +38,10 @@ are set aside once a publish. The yearly archives are kept as returned, by the s
     <data_dir>/goatbots/yearly/<year>-short-<UTC time>.zip  a whole year's that came short, fetched then
     <data_dir>/goatbots/yearly/<year>.none         GoatBots had no archive for the year: the day it said so
     <data_dir>/goatbots/card-definitions.zip       the definitions as the sync kept them before
-                                                   0037, each replacing the last; left as it is
+                                                   2026-09-29, each replacing the last; left as it is
 
 An empty price file ({}) or empty definitions keep nothing; either is asked for again next
-run, and is a warning after seven runs in a row (riffle.ingest.empties).
+run, and is a warning after seven runs in a row (riffle.ingest.remote._empties).
 The yearly archives are the history before Riffle's own: GoatBots keeps only the last few
 years, so every year it still has is kept once, newest first, until a year it has none for,
 which is asked for again a week later. The current year's is kept as it stands, and again

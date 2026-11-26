@@ -13,6 +13,8 @@ BASE = "https://www.mtgo.com"
 KINDS = ("league", "challenge", "showcase", "qualifier", "preliminary", "other")
 
 
+# The formats mtgo.com publishes decklists in, spelled as its event names spell them. Tab
+# completion offers these; ingest takes whatever format an event name starts with.
 FORMATS = ("standard", "pioneer", "modern", "legacy", "vintage", "pauper", "premodern", "duel-commander")
 
 
@@ -95,7 +97,7 @@ def _record(d: dict, kind: str) -> str | None:
     w = d.get("wins")
     if isinstance(w, dict) and w.get("wins") is not None:
         return f"{w['wins']}-{w.get('losses', 0)}"
-    return "5-0" if kind == "league" else None
+    return "5-0" if kind == "league" else None  # MTGO only publishes 5-0 league lists
 
 
 def parse_event(slug: str, data: dict) -> Event:

@@ -1,8 +1,9 @@
 """Schema migrations with Alembic, the scripts shipped inside the package.
 
 No alembic.ini: `riffle db upgrade` builds the configuration here, so it works
-from any directory, the launchd job and the home server included. Migrations
-are written by hand; a test checks that they build what the models define.
+from any directory, including the one launchd or systemd starts a job in.
+Migrations are written by hand; a test checks that they build what the models
+define.
 """
 
 from pathlib import Path

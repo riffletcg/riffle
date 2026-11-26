@@ -3,8 +3,8 @@ data, and a dump loaded back in its place.
 
 pg_dump, pg_restore and psql run inside the database's own container (compose.in_db), so they
 are always the server's version and no machine needs a Postgres client. They run only when
-database_url names that same server, its system identifier read both ways: otherwise a Mac whose
-URL names the server would dump, or overwrite, the database it stopped running itself.
+database_url names that same server, its system identifier read both ways: otherwise a machine
+whose URL names another server would dump, or overwrite, the database left in its own container.
 
 A dump's SHA-256 is kept beside it (<dump>.sha256, as sha256sum writes it), and a restore checks
 it first: reading a dump back proves it whole when it's made, not that it's unchanged since. Each
@@ -24,7 +24,7 @@ from riffle import config, db, runs
 from riffle.db import compose
 
 FOLDER = "db-backups"
-KEEP = timedelta(days=7)  # a week of dumps here; the server's off-site copy keeps older ones
+KEEP = timedelta(days=7)  # a week of dumps here
 NAME = re.compile(r"^(?P<database>.+)-(?P<stamp>\d{4}-\d{2}-\d{2}T\d{6}(?:\.\d+)?Z)\.dump$")
 SUM = ".sha256"
 IDENTITY = "SELECT system_identifier FROM pg_control_system()"

@@ -162,7 +162,7 @@ def test_a_guide_kept_in_both_daily_and_lists_is_one_publish(data_dir, few, trac
     run(Source(every()))  # kept in lists/
     day = data_dir / "daily" / "2026-09-27"
     day.mkdir(parents=True)
-    (day / "mtg.json.gz").write_bytes(gzip.compress(guide(STAMP)))  # and kept a day, before 0033
+    (day / "mtg.json.gz").write_bytes(gzip.compress(guide(STAMP)))  # and kept a day, before 2026-09-29
     assert len(cardmarket.made("mtg")) == 1
     run(Source(every()), tracker, now=NOW + timedelta(minutes=5), always=False)
     assert tracker.outcomes()["Cardmarket mtg"][1].endswith("0 so far")  # not a gap of nothing

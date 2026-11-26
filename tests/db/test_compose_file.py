@@ -84,7 +84,7 @@ def _mount(kind: str, source: str) -> dict:
 
 def test_compose_publishes_on_localhost_and_keeps_the_named_volume_with_nothing_set(render):
     """Unset, Compose publishes Postgres on 127.0.0.1 and keeps the data in the named volume, as it
-    did before the settings existed: a Mac's `riffle db up` changes nothing."""
+    did before the settings existed: `riffle db up` changes nothing on a machine that sets neither."""
     config = render()
     port, volume = _db(config)
     assert port == _published("127.0.0.1")

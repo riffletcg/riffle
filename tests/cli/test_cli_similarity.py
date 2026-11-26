@@ -11,7 +11,7 @@ from tests.cli.conftest import lines, write_decks
 from tests.conftest import CARDS, invoke
 
 EXTRA = {
-    # the plan's fixture cards conftest lacks: an accent, a dot, the example's burn cards and a basic
+    # the fixture cards conftest lacks: an accent, a dot, the example's burn cards and a basic
     "x-jotun": ("Jötun Grunt", "normal", 0.5, None),
     "x-cerberus": ("Summon G.F. Cerberus", "normal", 0.5, None),
     "x-guide": ("Goblin Guide", "normal", 2.0, 0.1),
@@ -61,7 +61,7 @@ DWARVES = {**RATS_C, "slug": "dwarves", "colors": "[R]", "main": "7 Seven Dwarve
 
 BURN_MAIN = "4 Lightning Bolt\n4 Goblin Guide\n4 Monastery Swiftspear\n4 Fire // Ice\n20 Mountain"
 BURN = {"folder": "modern", "slug": "burn", "main": BURN_MAIN}
-# nearest to burn, in the order the plan sorts them: main-deck swaps, then Jaccard higher first, then name;
+# nearest to burn, in the order `similar` sorts them: main-deck swaps, then Jaccard higher first, then name;
 # the folders put the two at 0.88 in the other order on disk; above each, its swaps and Jaccard
 NEAR = [
     # 1, 0.94
@@ -113,7 +113,7 @@ EXAMPLE = [
 
 @pytest.fixture
 def catalog(opened, monkeypatch):
-    """The in-memory catalog behind open_catalog, resolving the plan's fixture cards too."""
+    """The in-memory catalog behind open_catalog, resolving these fixture cards too."""
     for oid, card in EXTRA.items():
         monkeypatch.setitem(CARDS, oid, card)
     return opened
@@ -151,7 +151,7 @@ def cells(line):
 
 
 def check_columns(table, right):
-    """The plan's column rule: in a column in `right` every cell ends where the others do (right-aligned),
+    """The column rule: in a column in `right` every cell ends where the others do (right-aligned),
     in another every cell starts together, and each column starts two spaces past the widest cell of
     the one before. A line with fewer cells (the compare table's header, no label) fills from the right."""
     width = max(len(cells(line)) for line in table)
@@ -216,7 +216,7 @@ def test_without_sideboards_the_table_has_the_main_column_alone(mtg, catalog):
     assert out[9:] == EXAMPLE[9:12]
 
 
-# a sideboard in one list alone still gets the column: — where Definition 2 leaves no value, and "none"
+# a sideboard in one list alone still gets the column: — where a measure has no value, and "none"
 # for the list with nothing only in it
 def test_a_sideboard_in_one_list_shows_the_column_with_dashes_and_none(mtg, catalog):
     _vault(mtg, BURN_A, without(BURN_B, "side"))
@@ -435,8 +435,8 @@ def test_compare_and_similar_write_nothing(mtg, catalog):
     assert not Path(os.environ["XDG_DATA_HOME"]).exists()
 
 
-# Fixed after review: a .txt list has no format, so compare reads it in the note's: a Modern note against
-# a list gets Modern's verdict, not "different formats"
+# a .txt list has no format, so compare reads it in the note's: a Modern note against a list gets
+# Modern's verdict, not "different formats"
 def test_a_txt_list_is_read_in_the_other_decks_format(mtg, tmp_path, catalog):
     _vault(mtg, BURN_A)
     path = tmp_path / "list.txt"
@@ -444,7 +444,7 @@ def test_a_txt_list_is_read_in_the_other_decks_format(mtg, tmp_path, catalog):
     assert "verdict: no line measured for modern yet" in lines("compare", "burn-a", str(path))
 
 
-# Fixed after review: `similar` on a list with no format compares it with every deck note, and says so
+# `similar` on a list with no format compares it with every deck note, and says so
 def test_similar_on_a_list_without_a_format_reads_every_deck_note(mtg, tmp_path, catalog):
     _vault(mtg, BURN_A, BURN_B, RATS_A)
     path = tmp_path / "list.txt"
@@ -455,7 +455,7 @@ def test_similar_on_a_list_without_a_format_reads_every_deck_note(mtg, tmp_path,
     assert {cells(line)[-2] for line in out[2:]} == {"—"}
 
 
-# Fixed after review: with no deck note at all, a list with no format has nothing to be compared with
+# with no deck note at all, a list with no format has nothing to be compared with
 def test_similar_on_a_list_without_a_format_and_no_notes_says_so(mtg, tmp_path, catalog):
     _vault(mtg)
     path = tmp_path / "list.txt"
@@ -463,8 +463,8 @@ def test_similar_on_a_list_without_a_format_and_no_notes_says_so(mtg, tmp_path, 
     assert lines("similar", str(path)) == ["no deck note to compare it with"]
 
 
-# Fixed after review: `similar` leaves out the target's own note by its path, so a list given by path keeps
-# the note it shares a name with, here at 0 swaps
+# `similar` leaves out the target's own note by its path, so a list given by path keeps the note it
+# shares a name with, here at 0 swaps
 def test_similar_leaves_out_only_the_target_note_itself(mtg, tmp_path, catalog):
     _vault(mtg, RATS_A, RATS_B)
     path = tmp_path / "rats-a.txt"
@@ -502,8 +502,8 @@ def test_the_verdict_reads_the_main_deck_alone(mtg, catalog):
     assert cells(lines("similar", "rats-a")[2])[-2] == "variant"
 
 
-# Fixed after review: compare reads commanders through the catalog, so two names the catalog knows as one
-# card are one commander
+# compare reads commanders through the catalog, so two names the catalog knows as one card are one
+# commander
 def test_compare_reads_commanders_through_the_catalog(mtg, monkeypatch, catalog, cat):
     alias = {**RATS_B, "commander": "1 Yshtola of the Night"}
     _vault(mtg, RATS_A, alias)
@@ -543,8 +543,8 @@ def test_one_deck_is_singular(mtg, catalog):
     assert lines("similar", "burn-a")[0] == "nearest to burn-a: modern; 1 of 1 deck, basic lands aside"
 
 
-# Fixed after review: the card lines read accents as their letters, so a name with an accent sorts among its
-# letter's, not after Z; semicolons part the names, since a legend's may hold a comma
+# the card lines read accents as their letters, so a name with an accent sorts among its letter's,
+# not after Z; semicolons part the names, since a legend's may hold a comma
 def test_card_lines_read_accents_as_their_letters(mtg, catalog):
     _vault(
         mtg,

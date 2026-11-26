@@ -13,8 +13,8 @@ lists, each asked when it's due.
     <data_dir>/<store>/aside/              what a watch fetched and couldn't keep as a list,
                                            named by when it was fetched
 
-Until 0054 the log was one file, <store>/watch.jsonl, read whole at every firing and walked once
-for each list: Cardmarket's took 41 seconds a firing on 2026-10-05, a week in. The first run that
+Until 2026-10-05 the log was one file, <store>/watch.jsonl, read whole at every firing and walked
+once for each list: Cardmarket's took 41 seconds a firing that day, a week in. The first run that
 holds a store's lock moves it to the month file of its last entry (moved). A run reads the
 months from lateness.WINDOW before it on (read): two files, three on 1 and 2 March. What its
 rules need from before that, each list's last check and when each list it got in the last
@@ -67,8 +67,8 @@ def _months(store: str) -> list[Path]:
 
 
 def files(store: str) -> list[Path]:
-    """The store's log files, oldest first: the one file kept before 0054 while it's still
-    there (moved), then each month's."""
+    """The store's log files, oldest first: the one file kept before 2026-10-05 while it's
+    still there (moved), then each month's."""
     old = _old_path(store)
     return [old, *_months(store)] if old.exists() else _months(store)
 
@@ -80,7 +80,7 @@ def _tags_path(store: str) -> Path:
 @contextmanager
 def held(store: str) -> Iterator[bool]:
     """Whether this run holds the store's watch lock (riffle.locks.held). A run that holds it
-    first moves the log kept before 0054 (moved)."""
+    first moves the log kept before 2026-10-05 (moved)."""
     with locks.held(data_dir() / store / "watch.lock") as mine:
         if mine:
             moved(store)
@@ -133,9 +133,9 @@ def back(store: str) -> Iterator[dict]:
 
 
 def moved(store: str) -> None:
-    """Move the log kept in one file before 0054 to the month file of its last entry. A month
-    file there already keeps its lines, after the old file's; the old file goes last, so a move
-    cut off is finished by the next run, with no line lost or doubled."""
+    """Move the log kept in one file before 2026-10-05 to the month file of its last entry. A
+    month file there already keeps its lines, after the old file's; the old file goes last, so a
+    move cut off is finished by the next run, with no line lost or doubled."""
     old = _old_path(store)
     try:
         text = old.read_text(encoding="utf-8")

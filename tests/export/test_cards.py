@@ -1,4 +1,4 @@
-"""Card links and the card notes behind them (export/links.py, export/cards.py)."""
+"""Card links and the card notes behind them (riffle.links, riffle.export.cards)."""
 
 import re
 from collections import Counter
@@ -17,8 +17,6 @@ SRC = Path(__file__).resolve().parents[2] / "src" / "riffle"
 
 
 # ---- the link form ----------------------------------------------------------------------
-# The same cases as the vault's deckdata.link(), which writes the form by hand until the deck
-# tools move into Riffle.
 
 
 @pytest.mark.parametrize(
@@ -306,7 +304,7 @@ def test_a_card_without_a_view_still_gets_its_links(cat):
 
 def test_a_note_named_with_decomposed_accents_is_taken_over_not_deleted(tmp_path, cat):
     """macOS opens "Andúril" whether its ú is one character or u and an accent; Python's strings
-    differ. The old script's notes had the second form: the sync wrote each, then pruned it."""
+    differ. The old notes had the second form: the sync wrote each, then pruned it."""
     import unicodedata
 
     folder = tmp_path / "cards"

@@ -131,7 +131,7 @@ CARDS = [
         illustration_id="art-bolt",
     ),
     card("bolt-mo", "o-bolt", "Lightning Bolt", digital=True, prices={"usd": "0.01", "tix": "0.02"}),
-    # a price is the cheapest printing that can be played (C48): not gold- or silver-bordered, not
+    # a price is the cheapest printing that can be played: not gold- or silver-bordered, not
     # from a memorabilia set, not oversized; a card with none falls back to its cheapest
     card("tomb-1", "o-tomb", "Ancient Tomb", prices={"usd": "123.01"}),
     card(
@@ -211,7 +211,7 @@ def test_unknown_cards_have_no_rules(cat):
         ("Sol Ring", "o-sol"),
         ("Sol Ring // Sol Ring", "o-sol-art"),
         ("Not A Card", None),
-        # a safe name, as a card's link writes it (export/links.py)
+        # a safe name, as a card's link writes it (riffle.links)
         ("Ach! Hans, Run!", "o-hans"),
         ("ach!  hans, run! ", "o-hans"),
         ("Summon ChocoMog", "o-choco"),
