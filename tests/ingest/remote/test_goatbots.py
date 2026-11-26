@@ -15,6 +15,7 @@ import pytest
 from riffle import locks, net, runs
 from riffle.ingest.remote import goatbots
 from riffle.watch import watching
+from tests.ingest.remote.conftest import Dated
 
 NEW, OLD = goatbots.BASES
 DAY = date(2026, 9, 27)
@@ -56,70 +57,17 @@ def made(day: date) -> datetime:
     return datetime.combine(day + timedelta(1), time(3, 15, 20), UTC)
 
 
-class _Auto:
-    """The stamp read from the body, as the real source reads it."""
+class Source(Dated):
+    """GoatBots: each zip's Last-Modified when its newest price file's day was made."""
 
+    accept = "application/zip"
 
-AUTO = _Auto()
-
-
-class Source:
-    """GoatBots as a download and as net.fetch_new: url -> body, None (404), or an exception to
-    raise, each body's ETag its hash, its Last-Modified when its newest price file's day was
-    made (or `modified`). Records every url asked for, and the ETags sent."""
-
-    def __init__(
-        self,
-        answers: dict[str, bytes | None | Exception],
-        modified: datetime | None | _Auto = AUTO,
-        tagged: bool = True,
-    ):
-        self.answers = answers
-        self.asked: list[str] = []
-        self.etags: list[str | None] = []
-        self.modified = modified
-        self.tagged = tagged
-
-    def _answer(self, url: str) -> bytes | None:
-        self.asked.append(url)
-        body = self.answers.get(url)
-        if isinstance(body, Exception):
-            raise body
-        return body
-
-    def download(self, url, dest, progress=None):
-        body = self._answer(url)
-        if body is None:
-            return None
-        dest.write_bytes(body)
-        if progress:
-            progress(len(body), len(body))
-        return len(body)
-
-    def _stamp(self, body: bytes) -> datetime | None:
-        if not isinstance(self.modified, _Auto):
-            return self.modified
+    def made(self, body: bytes) -> datetime:
         try:
             with zipfile.ZipFile(io.BytesIO(body)) as zf:
                 return made(max(goatbots.price_days(zf), default=DAY))
         except (zipfile.BadZipFile, ValueError):
             return made(DAY)
-
-    def fetch(self, url, dest, known, etag=None, accept="*/*", progress=None, missing=(404,)):
-        self.etags.append(etag)
-        body = self._answer(url)
-        if body is None:
-            return None
-        tag = f'"{hash(body)}"'
-        if etag == tag:
-            return net.Fetched("unchanged", b"", etag)
-        assert accept == "application/zip" and not known(body[: net.HEAD])
-        dest.write_bytes(body)
-        if progress:
-            progress(len(body), None)
-        return net.Fetched(
-            "new", body[: net.HEAD], tag if self.tagged else None, len(body), self._stamp(body)
-        )
 
 
 def answers(day: date = DAY, **overrides):
@@ -136,7 +84,7 @@ def answers(day: date = DAY, **overrides):
 
 def watch(source: Source, tracker=None, now: datetime = NOW, always: bool = True) -> watching.Watch:
     kw = {} if tracker is None else {"tracker": tracker}
-    return goatbots.watch(fetch=source.fetch, clock=lambda: now, always=always, **kw)
+    return goatbots.watch(fetch=source.fetch_new, clock=lambda: now, always=always, **kw)
 
 
 def run(source: Source, tracker=None, today: date | None = None) -> goatbots.Snapshot:
@@ -163,12 +111,11 @@ TODAY = date(2026, 9, 28)  # UTC
 
 
 @pytest.fixture
-def data_dir(tmp_path, monkeypatch):
-    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path))
+def data_dir(data_dir, monkeypatch):
     monkeypatch.setattr(goatbots.times, "today", lambda: TODAY)
     monkeypatch.setattr(goatbots.times, "now", lambda: NOW)
     monkeypatch.setattr(goatbots, "LISTS", (goatbots.LIST,))  # the cards' tests set them back
-    return tmp_path / "riffle" / "goatbots"
+    return data_dir / "goatbots"
 
 
 def test_the_first_run_keeps_the_day_and_every_year_goatbots_has(data_dir, tracker):

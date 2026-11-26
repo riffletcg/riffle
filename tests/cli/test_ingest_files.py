@@ -1,13 +1,12 @@
 """ManaBox, Arena, and config: the files the tool reads."""
 
 import pytest
-from typer.testing import CliRunner
 
 from riffle import config
 from riffle.analysis.resolve import counts, resolve_holdings
-from riffle.cli import app
 from riffle.ingest.local import arena, manabox
 from riffle.models import Holding
+from tests.conftest import invoke
 
 MANABOX = (
     "\ufeffName,Set code,Set name,Collector number,Foil,Rarity,Quantity,ManaBox ID,Scryfall ID,Language\n"
@@ -122,8 +121,7 @@ def test_a_vault_that_isnt_a_folder_s_name_is_named_and_none_used():
         ),
     ],
 )
-def test_the_card_note_settings(tmp_path, monkeypatch, lines, notes, images, unread):
-    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+def test_the_card_note_settings(no_config, lines, notes, images, unread):
     config.write_default().write_text(lines)
     cfg = config.load()
     path = config.tilde(config.config_path())
@@ -147,17 +145,14 @@ def test_the_card_note_settings(tmp_path, monkeypatch, lines, notes, images, unr
         ),
     ],
 )
-def test_the_backup_log_setting_names_the_backup_job_s_log(tmp_path, monkeypatch, line, named, unread):
-    monkeypatch.setenv("HOME", str(tmp_path))
-    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / ".config"))
+def test_the_backup_log_setting_names_the_backup_job_s_log(bare_home, line, named, unread):
     config.write_default().write_text(line)
     cfg = config.load()
-    assert cfg.backup_log == (tmp_path / ".local" / "state" / "backup" / "backup.log" if named else None)
+    assert cfg.backup_log == (bare_home / ".local" / "state" / "backup" / "backup.log" if named else None)
     assert cfg.unread == unread
 
 
-def test_config_file_is_read_and_never_overwritten(tmp_path, monkeypatch):
-    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+def test_config_file_is_read_and_never_overwritten(no_config):
     path = config.write_default()
     path.write_text('vault = "~/elsewhere"\nprecons = ["M3C-tricky-terrain"]\n')
     assert config.write_default() == path
@@ -166,8 +161,7 @@ def test_config_file_is_read_and_never_overwritten(tmp_path, monkeypatch):
     assert "~" not in str(cfg.vault) and cfg.vault.name == "elsewhere"
 
 
-def test_the_notes_folder_is_read_against_the_vault_unless_absolute(tmp_path, monkeypatch):
-    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+def test_the_notes_folder_is_read_against_the_vault_unless_absolute(tmp_path, no_config):
     path = config.write_default()
     assert 'notes = "games/tcg"' in path.read_text()
     path.write_text(f'vault = "{tmp_path / "v"}"\nnotes = "cards"\n')
@@ -177,49 +171,47 @@ def test_the_notes_folder_is_read_against_the_vault_unless_absolute(tmp_path, mo
     assert config.load().notes == tmp_path / "away"
 
 
-def _old_config(tmp_path, monkeypatch, vault: str) -> config.Config:
+def _old_config(vault: str) -> config.Config:
     """A config written before the notes setting: vault named the folder holding tcg/."""
-    monkeypatch.setenv("HOME", str(tmp_path))
-    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / ".config"))
     config.write_default().write_text(f'vault = "{vault}"\n')
     return config.load()
 
 
-def test_an_old_config_reads_tcg_in_the_vault_and_says_what_to_set(tmp_path, monkeypatch):
-    (tmp_path / "vault" / ".obsidian").mkdir(parents=True)
-    cfg = _old_config(tmp_path, monkeypatch, "~/vault/games")
-    assert cfg.mtg_dir == tmp_path / "vault" / "games" / "tcg" / "mtg"
+def test_an_old_config_reads_tcg_in_the_vault_and_says_what_to_set(bare_home):
+    (bare_home / "vault" / ".obsidian").mkdir(parents=True)
+    cfg = _old_config("~/vault/games")
+    assert cfg.mtg_dir == bare_home / "vault" / "games" / "tcg" / "mtg"
     assert cfg.old_notes == (
         "~/.config/riffle/config.toml names no notes folder, so it's ~/vault/games/tcg: "
         'set vault = "~/vault" and add notes = "games/tcg"'
     )
 
 
-def test_an_old_config_already_naming_the_vault_only_needs_a_notes_line(tmp_path, monkeypatch):
-    (tmp_path / "vault" / ".obsidian").mkdir(parents=True)
-    cfg = _old_config(tmp_path, monkeypatch, "~/vault")
-    assert cfg.mtg_dir == tmp_path / "vault" / "tcg" / "mtg"
+def test_an_old_config_already_naming_the_vault_only_needs_a_notes_line(bare_home):
+    (bare_home / "vault" / ".obsidian").mkdir(parents=True)
+    cfg = _old_config("~/vault")
+    assert cfg.mtg_dir == bare_home / "vault" / "tcg" / "mtg"
     assert str(cfg.old_notes).endswith('so it\'s ~/vault/tcg: add notes = "tcg"')
 
 
-def test_an_old_config_outside_any_vault_keeps_its_folder(tmp_path, monkeypatch):
-    elsewhere = tmp_path.parent / f"{tmp_path.name}-elsewhere"  # not under HOME, no .obsidian above it
-    cfg = _old_config(tmp_path, monkeypatch, str(elsewhere))
+def test_an_old_config_outside_any_vault_keeps_its_folder(bare_home):
+    elsewhere = bare_home.parent / f"{bare_home.name}-elsewhere"  # not under HOME, no .obsidian above it
+    cfg = _old_config(str(elsewhere))
     assert cfg.notes == elsewhere / "tcg"
     assert str(cfg.old_notes).endswith(f'so it\'s {elsewhere / "tcg"}: add notes = "tcg"')
 
 
-def test_init_shows_the_vault_and_the_notes_folder(tmp_path, monkeypatch):
-    (tmp_path / "vault" / ".obsidian").mkdir(parents=True)
-    _old_config(tmp_path, monkeypatch, "~/vault/games")
+def test_init_shows_the_vault_and_the_notes_folder(bare_home):
+    (bare_home / "vault" / ".obsidian").mkdir(parents=True)
+    _old_config("~/vault/games")
     config.config_path().write_text('vault = "~/vault/games"\nprecons = []\n')
-    result = CliRunner().invoke(app, ["init"])
+    result = invoke("init")
     assert result.exit_code == 0, result.output
     assert "  ! `precons` in config is ignored: " in result.output
-    assert f"vault      {tmp_path / 'vault' / 'games'}\n" in result.output
-    assert f"notes      {tmp_path / 'vault' / 'games' / 'tcg'}\n" in result.output
+    assert f"vault      {bare_home / 'vault' / 'games'}\n" in result.output
+    assert f"notes      {bare_home / 'vault' / 'games' / 'tcg'}\n" in result.output
     assert "  ! ~/.config/riffle/config.toml names no notes folder, so it's " in result.output
     config.config_path().write_text('vault = "~/vault"\nnotes = "games/tcg"\n')
-    result = CliRunner().invoke(app, ["init"])
-    assert f"notes      {tmp_path / 'vault' / 'games' / 'tcg'}\n" in result.output
+    result = invoke("init")
+    assert f"notes      {bare_home / 'vault' / 'games' / 'tcg'}\n" in result.output
     assert "!" not in result.output

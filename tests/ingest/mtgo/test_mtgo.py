@@ -6,7 +6,6 @@ from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 
 import pytest
-from typer.testing import CliRunner
 
 import riffle.ingest.mtgo.pages as ingest_mtgo_pages
 import riffle.ingest.mtgo.storage as ingest_mtgo_storage
@@ -15,6 +14,7 @@ import riffle.models.metagame as models_metagame
 from riffle import net, times, trickle
 from riffle.analysis import metagame
 from riffle.ingest.local.decklist import parse_text
+from tests.conftest import invoke
 
 INDEX = """
 <a href="/decklist/modern-challenge-32-2026-09-1912850001">Modern Challenge 32</a>
@@ -126,8 +126,7 @@ def test_card_stats_and_find():
 EMPTY = {"decklists": []}
 
 
-def test_old_empty_files_are_refetched_and_hidden(tmp_path, monkeypatch):
-    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path))
+def test_old_empty_files_are_refetched_and_hidden():
     slug = "modern-league-2026-09-2012850002"
     ingest_mtgo_storage.save(ingest_mtgo_pages.parse_event(slug, EMPTY))  # what the first version wrote
     assert not ingest_mtgo_storage.is_stored(slug)
@@ -221,16 +220,14 @@ def test_bad_slug_raises():
         ingest_mtgo_pages.parse_event("decklists", CHALLENGE)
 
 
-def test_event_roundtrips_through_storage(tmp_path, monkeypatch):
-    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path))
+def test_event_roundtrips_through_storage():
     e = ingest_mtgo_pages.parse_event("modern-challenge-32-2026-09-1912850001", CHALLENGE)
     ingest_mtgo_storage.save(e)
     [back] = ingest_mtgo_storage.load()
     assert back == e
 
 
-def test_load_filters(tmp_path, monkeypatch):
-    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path))
+def test_load_filters(tmp_path):
     ingest_mtgo_storage.save(
         ingest_mtgo_pages.parse_event("modern-challenge-32-2026-09-1912850001", CHALLENGE)
     )
@@ -348,11 +345,11 @@ def test_an_event_cut_off_while_written_leaves_no_file(monkeypatch):
 
 def test_meta_show_finds_an_event_under_its_month_or_where_earlier_builds_kept_it():
     ingest_mtgo_storage.save(ingest_mtgo_pages.parse_event(STORED_SLUG, CHALLENGE))
-    assert _cli("meta", "show", STORED_SLUG, "alice").output.startswith("4 Thoughtseize\n")
+    assert invoke("meta", "show", STORED_SLUG, "alice").output.startswith("4 Thoughtseize\n")
     top = ingest_mtgo_pages.parse_event(OLD, LEAGUE)
     (ingest_mtgo_storage.store_dir() / f"{OLD}.json").write_text(json.dumps(asdict(top)))
-    assert _cli("meta", "show", OLD, "carol").output == "2 Thoughtseize\n"
-    assert "no stored event" in _cli("meta", "show", OLDER, "carol").output
+    assert invoke("meta", "show", OLD, "carol").output == "2 Thoughtseize\n"
+    assert "no stored event" in invoke("meta", "show", OLDER, "carol").output
 
 
 # ---- the trickle ------------------------------------------------------------------
@@ -1099,12 +1096,6 @@ def test_months_not_read_whole_yet_newest_first():
 # ---- the commands -----------------------------------------------------------------
 
 
-def _cli(*args):
-    from riffle.cli import app
-
-    return CliRunner().invoke(app, list(args))
-
-
 def test_the_trickle_command_reports_the_run(monkeypatch):
     soon = trickle.now() + timedelta(hours=1, minutes=1)
 
@@ -1132,7 +1123,7 @@ def test_the_trickle_command_reports_the_run(monkeypatch):
         )
 
     monkeypatch.setattr(ingest_mtgo_trickle, "run_trickle", run)
-    result = _cli("mtgo", "trickle")
+    result = invoke("mtgo", "trickle")
     assert result.exit_code == 1
     for line in (
         f"set aside 1 owed page whose name holds no real date: {UNDATED} (kept in mtgo-owed-set-aside.jsonl)",
@@ -1176,7 +1167,7 @@ def test_the_trickle_command_reports_the_run(monkeypatch):
 )
 def test_the_trickle_command_says_why_it_asked_little(monkeypatch, res, line):
     monkeypatch.setattr(ingest_mtgo_trickle, "run_trickle", lambda tracker: res)
-    result = _cli("mtgo", "trickle")
+    result = invoke("mtgo", "trickle")
     assert result.exit_code == 0 and line in result.output
 
 
@@ -1187,7 +1178,7 @@ def test_a_pause_is_shown_in_the_mac_s_time_on_a_terminal(monkeypatch, on_a_term
         lambda tracker: ingest_mtgo_trickle.TrickleResult(paused_until=NOW),
     )
     assert (
-        "paused until 2026-09-21 06:00 MDT: mtgo.com asked; nothing asked" in _cli("mtgo", "trickle").output
+        "paused until 2026-09-21 06:00 MDT: mtgo.com asked; nothing asked" in invoke("mtgo", "trickle").output
     )
 
 
@@ -1199,7 +1190,7 @@ def test_the_status_command():
         {"2026-09": _read(10, at=at), "2025-02": _failed(1, days=["2026-09-21"])}
     )
     ingest_mtgo_trickle.ages_path().write_text(json.dumps({"league": 100000.0, "challenge": 9.62}))
-    result = _cli("mtgo", "status")
+    result = invoke("mtgo", "status")
     assert result.exit_code == 0
     for line in (
         "pace       2 pages a run, one more after each run whose every answer is whole",
@@ -1222,7 +1213,7 @@ def test_the_status_command_says_why_its_paused_and_at_the_top_pace():
         ),
     )
     ingest_mtgo_trickle._save_months({"2026-09": _failed(2, days=THREE_DAYS[:2])})
-    output = _cli("mtgo", "status").output
+    output = invoke("mtgo", "status").output
     assert "pace       5 pages a run, as many as the ceiling allows" in output
     assert ": x said so" in output and "believed empty on 2 days" in output and "asked 2 times" in output
 
@@ -1238,7 +1229,7 @@ def test_the_status_command_lists_the_retries_newest_first():
         owed[slug].asks, owed[slug].again, owed[slug].rounds = trickle.ROUND, 0, 1
     owed["retry-01"].last, owed["retry-01"].asks, owed["retry-01"].again = "not published yet", 2, 1
     trickle.save_owed(ingest_mtgo_trickle.SOURCE, owed)
-    lines = _cli("mtgo", "status").output.splitlines()
+    lines = invoke("mtgo", "status").output.splitlines()
     assert "owed       13 events: 1 never asked, 12 to retry" in lines
     first = lines.index(next(line for line in lines if line.startswith("retries")))
     soon = times.utc(owed["retry-00"].retry_at())
@@ -1256,7 +1247,7 @@ def test_the_status_command_survives_an_owed_event_with_no_real_date():
     owed[UNDATED].tried(trickle.now() - timedelta(minutes=30), "redirect", miss=True)
     trickle.save_owed(ingest_mtgo_trickle.SOURCE, owed)
     ingest_mtgo_trickle._save_months({"2026-09": {**_read(10, at=trickle.now()), "undated": [UNDATED]}})
-    result = _cli("mtgo", "status")
+    result = invoke("mtgo", "status")
     assert result.exit_code == 0
     line = f"{UNDATED}  redirect, asked once, its date isn't a day; the next run sets it aside"
     assert line in result.output
@@ -1265,8 +1256,8 @@ def test_the_status_command_survives_an_owed_event_with_no_real_date():
 
 def test_the_forget_command():
     _owe(OLD)
-    assert _cli("mtgo", "forget", OLD).output == f"forgot {OLD}\n"
-    assert _cli("mtgo", "forget", OLD).exit_code == 1
+    assert invoke("mtgo", "forget", OLD).output == f"forgot {OLD}\n"
+    assert invoke("mtgo", "forget", OLD).exit_code == 1
 
 
 def test_an_event_file_that_isn_t_json_counts_as_not_stored():

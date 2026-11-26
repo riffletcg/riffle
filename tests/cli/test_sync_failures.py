@@ -1,62 +1,36 @@
 """A sync that meets trouble finishes what it can, then says what failed and exits 1."""
 
 import fcntl
-import io
 import json
 import os
-import re
-import socket
 import sys
 import threading
-from datetime import date
 from pathlib import Path
 
 import pytest
 import typer
-from typer.testing import CliRunner
 
 import riffle.cli._common as cli_common
 import riffle.cli.sync as cli_sync
 from riffle import config, net, progress
-from riffle.cli import app
-from riffle.ingest.remote import cardmarket, goatbots, mtgjson, pricelists, scryfall, scryfall_catalog, tcgcsv
+from riffle.ingest.remote import mtgjson, scryfall, scryfall_catalog
 from riffle.ops import sync as workflow
 from riffle.progress import Watched
+from tests.conftest import (
+    BURN_NOTE,
+    EXITED,
+    ONLINE,
+    Terminal,
+    before_closing,
+    invoke,
+    network,
+    online_steps,
+    write_burn,
+)
 
 pytestmark = pytest.mark.usefixtures("backup_made")
 
 REAL_UPDATE = scryfall_catalog.update
-NOTE = "---\ngame: mtg\nformat: modern\n---\n\n## Moxfield import\n\n```\n4 Lightning Bolt\n```\n"
-
-
-class Clock:
-    """time.monotonic and time.sleep for net.wait_online, with no real waiting."""
-
-    def __init__(self) -> None:
-        self.now = 0.0
-
-    def monotonic(self) -> float:
-        return self.now
-
-    def sleep(self, seconds: float) -> None:
-        self.now += seconds
-
-
-def network(monkeypatch, up_after: float | None) -> list[tuple[str, int]]:
-    """The network comes up after up_after seconds (None: never). Returns every address tried."""
-    clock, tried = Clock(), []
-
-    def create_connection(address, timeout):
-        tried.append(address)
-        if up_after is None or clock.now < up_after:
-            raise OSError("Network is unreachable")
-        return socket.socket()
-
-    monkeypatch.setattr(net.socket, "create_connection", create_connection)
-    monkeypatch.setattr(net.time, "monotonic", clock.monotonic)
-    monkeypatch.setattr(net.time, "sleep", clock.sleep)
-    return tried
-
 
 # ---- waiting for the network ---------------------------------------------------------------
 
@@ -102,100 +76,38 @@ def test_watched_passes_steps_on_and_remembers_failures(tracker):
     )
 
 
-@pytest.fixture
-def vault(tmp_path, monkeypatch, opened):
-    """A one-deck vault under a fake HOME, the in-memory catalog, and a price snapshot kept."""
-    monkeypatch.setenv("HOME", str(tmp_path))
-    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))  # the default vault, under HOME
-    (tmp_path / "config" / "riffle").mkdir(parents=True)
-    (tmp_path / "config" / "riffle" / "config.toml").write_text(
-        'vault = "~/vault"\nnotes = "games/tcg"\ncard_images = "link"\n'
-    )
-    mtg = tmp_path / "vault" / "games" / "tcg" / "mtg"
-    (mtg / "modern").mkdir(parents=True)
-    (mtg / "modern" / "burn.md").write_text(NOTE)
-    monkeypatch.setattr(scryfall, "snapshot_prices", lambda: (Path("/d/2026-09-26.jsonl.gz"), False))
-    return mtg
-
-
-# What an online sync does, in order: the Scryfall download and catalog load, then each price source.
-ONLINE = [
-    "refresh",
-    "catalog",
-    "mtgjson",
-    "mtgjson 90 days",
-    "goatbots",
-    "goatbots years",
-    "cardmarket",
-    "cardkingdom",
-    "manapool",
-    "tcgcsv",
-]
-
-
-def online_steps(monkeypatch, calls, refresh_fails=False):
-    """The online steps, recorded in calls, each reporting a step as the real one does."""
-
-    def refresh(force, tracker):
-        calls.append("refresh")
-        step = tracker.step("Scryfall bulk data")
-        if refresh_fails:
-            step.fail("HTTP 503")
-        else:
-            step.ok("current")
-
-    def watch(delay, tracker, always):
-        calls.append("tcgcsv")
-        tracker.step("tcgcsv mtg").ok("456 groups")
-        snap = tcgcsv.Snapshot(day=date(2026, 9, 26), fetched=["mtg"], groups={"mtg": 456})
-        return tcgcsv.Watched(asked=True, snap=snap)
-
-    monkeypatch.setattr(scryfall, "refresh", refresh)
-    monkeypatch.setattr(scryfall_catalog, "update", lambda tracker, force: calls.append("catalog"))
-    monkeypatch.setattr(mtgjson, "watch", lambda tracker, always: calls.append("mtgjson"))
-    monkeypatch.setattr(mtgjson, "snapshot", lambda tracker: calls.append("mtgjson 90 days"))
-    monkeypatch.setattr(goatbots, "watch", lambda tracker, always: calls.append("goatbots"))
-    monkeypatch.setattr(goatbots, "snapshot", lambda tracker: calls.append("goatbots years"))
-    monkeypatch.setattr(cardmarket, "watch", lambda tracker, always: calls.append("cardmarket"))
-    monkeypatch.setattr(pricelists, "watch", lambda lists, tracker: calls.append(lists[0].store))
-    monkeypatch.setattr(tcgcsv, "watch", watch)
-
-
-def test_without_a_network_the_sync_goes_offline_and_exits_1(vault, monkeypatch):
+def test_without_a_network_the_sync_goes_offline_and_exits_1(one_deck, monkeypatch):
     network(monkeypatch, up_after=None)
     calls: list[str] = []
     online_steps(monkeypatch, calls)
-    result = CliRunner().invoke(app, ["sync"])
+    result = invoke("sync")
     assert result.exit_code == 1, result.output
     assert "! network: no connection after 2m 00s; syncing offline" in result.output
     assert calls == []  # no download, no catalog load, no price downloads
-    assert (vault / "_generated" / "burn-data.md").exists()
+    assert (one_deck / "_generated" / "burn-data.md").exists()
     assert before_closing(result.output) == "1 step failed: network"
 
 
-def test_a_network_that_comes_up_late_is_waited_for(vault, monkeypatch):
+def test_a_network_that_comes_up_late_is_waited_for(one_deck, monkeypatch):
     network(monkeypatch, up_after=20)
     calls: list[str] = []
     online_steps(monkeypatch, calls)
-    result = CliRunner().invoke(app, ["sync"])
+    result = invoke("sync")
     assert result.exit_code == 0, result.output
     assert "network: up after 20.0s" in result.output
     assert calls == ONLINE
 
 
-def test_a_network_that_is_up_goes_unmentioned(vault, monkeypatch):
+def test_a_network_that_is_up_goes_unmentioned(one_deck, monkeypatch):
     network(monkeypatch, up_after=0)
     online_steps(monkeypatch, [])
-    result = CliRunner().invoke(app, ["sync"])
+    result = invoke("sync")
     assert result.exit_code == 0, result.output
     assert "network" not in result.output
 
 
-def test_an_online_sync_keeps_the_card_pictures_and_shows_them_coming(vault, monkeypatch, tmp_path):
-
-    (tmp_path / "config" / "riffle" / "config.toml").write_text(
-        'vault = "~/vault"\nnotes = "games/tcg"\ncard_images = "cache"\n'
-    )
+def test_an_online_sync_keeps_the_card_pictures_and_shows_them_coming(one_deck, monkeypatch):
+    config.config_path().write_text('vault = "~/vault"\nnotes = "games/tcg"\ncard_images = "cache"\n')
     network(monkeypatch, up_after=0)
     online_steps(monkeypatch, [])
     fetched: list[str] = []
@@ -207,8 +119,8 @@ def test_an_online_sync_keeps_the_card_pictures_and_shows_them_coming(vault, mon
         return 3
 
     monkeypatch.setattr(workflow, "_picture", picture)
-    (vault / "ideas.md").write_text("[[Sol Ring]] [[Fire // Ice]]")
-    result = CliRunner().invoke(app, ["sync"])
+    (one_deck / "ideas.md").write_text("[[Sol Ring]] [[Fire // Ice]]")
+    result = invoke("sync")
     assert result.exit_code == 0, result.output
     assert sorted(fetched) == [
         "https://cards.scryfall.io/normal/front/s-fire.jpg",
@@ -221,7 +133,7 @@ def test_an_online_sync_keeps_the_card_pictures_and_shows_them_coming(vault, mon
         "  ! 1 card link can't open the card's note as written; riffle check vault lists them"
         in result.output
     )
-    note = vault / "_generated" / "cards" / "Lightning Bolt.md"
+    note = one_deck / "_generated" / "cards" / "Lightning Bolt.md"
     assert "![Lightning Bolt](img/s-o-bolt.jpg)" in note.read_text()
 
 
@@ -235,25 +147,25 @@ def test_the_picture_fetch_asks_scryfall_for_an_image(monkeypatch, tmp_path):
     ]
 
 
-def test_a_failed_download_doesnt_stop_the_sync(vault, monkeypatch):
+def test_a_failed_download_doesnt_stop_the_sync(one_deck, monkeypatch):
     network(monkeypatch, up_after=0)
     calls: list[str] = []
     online_steps(monkeypatch, calls, refresh_fails=True)
-    result = CliRunner().invoke(app, ["sync"])
+    result = invoke("sync")
     assert result.exit_code == 1, result.output
     assert calls == ONLINE
     assert "1 decks · 2 notes updated" in result.output
     assert before_closing(result.output) == "1 step failed: Scryfall bulk data"
 
 
-def test_every_failed_step_is_named(vault, monkeypatch):
+def test_every_failed_step_is_named(one_deck, monkeypatch):
     def no_bulk():
         raise FileNotFoundError("no Scryfall bulk file yet")
 
     monkeypatch.setattr(scryfall, "snapshot_prices", no_bulk)
     network(monkeypatch, up_after=None)
     online_steps(monkeypatch, [])
-    result = CliRunner().invoke(app, ["sync"])
+    result = invoke("sync")
     assert before_closing(result.output) == "2 steps failed: network, Scryfall prices"
 
 
@@ -268,19 +180,10 @@ def test_watch_keeps_watching_after_a_failed_resync(monkeypatch, capsys):
 
 # ---- the closing line of a run written as plain lines -------------------------------------------
 
-EXITED = re.compile(r"\d\d:\d\d:\d\d  exited (\d) after \d+\.\ds")
-
 
 def closing(out: str) -> str:
     """A run's last line, as its job's log has it."""
     return out.rstrip("\n").rsplit("\n", 1)[-1]
-
-
-def before_closing(out: str) -> str:
-    """A run's last line before its closing line, which says it exited 1."""
-    *_v, last, closed = out.rstrip("\n").split("\n")
-    assert EXITED.fullmatch(closed).group(1) == "1"
-    return last
 
 
 def test_a_run_whose_step_failed_closes_with_exit_1_after_naming_the_step(capsys):
@@ -317,14 +220,9 @@ def test_a_run_that_went_well_closes_with_exit_0(capsys):
     assert EXITED.fullmatch(lines[2]).group(1) == "0" and len(lines) == 3
 
 
-class _Terminal(io.StringIO):
-    def isatty(self) -> bool:
-        return True
-
-
 def test_a_run_on_a_terminal_has_no_closing_line(monkeypatch):
     monkeypatch.setenv("TERM", "xterm-256color")
-    monkeypatch.setattr(sys, "stdout", _Terminal())
+    monkeypatch.setattr(sys, "stdout", Terminal())
     with cli_common._tracked("riffle watch manapool") as tracker:
         tracker.step("Mana Pool singles").ok("kept")
     assert "exited" not in sys.stdout.getvalue()
@@ -333,18 +231,11 @@ def test_a_run_on_a_terminal_has_no_closing_line(monkeypatch):
 # ---- one source down, one bug: only its own steps fail ---------------------------------------
 
 
-def test_scryfall_alone_down_fails_only_its_own_steps(vault, monkeypatch):
-    monkeypatch.setattr(net.time, "sleep", lambda s: None)
-
-    def create_connection(address, timeout):
-        if address[0] == "api.scryfall.com":
-            raise socket.gaierror(8, "nodename nor servname provided, or not known")
-        return socket.socket()
-
-    monkeypatch.setattr(net.socket, "create_connection", create_connection)
+def test_scryfall_alone_down_fails_only_its_own_steps(one_deck, monkeypatch):
+    network(monkeypatch, up_after=0, down=("api.scryfall.com",))
     calls: list[str] = []
     online_steps(monkeypatch, calls, refresh_fails=True)
-    result = CliRunner().invoke(app, ["sync"])
+    result = invoke("sync")
     assert calls == ONLINE  # every price source still asked
     assert "network" not in result.output
     assert before_closing(result.output) == "1 step failed: Scryfall bulk data"
@@ -357,7 +248,7 @@ def test_the_network_wait_tries_every_source_scryfall_first():
     assert others <= set(hosts)
 
 
-def test_a_bug_in_one_source_fails_its_steps_and_the_rest_still_run(vault, monkeypatch):
+def test_a_bug_in_one_source_fails_its_steps_and_the_rest_still_run(one_deck, monkeypatch):
     network(monkeypatch, up_after=0)
     calls: list[str] = []
     online_steps(monkeypatch, calls)
@@ -368,7 +259,7 @@ def test_a_bug_in_one_source_fails_its_steps_and_the_rest_still_run(vault, monke
         raise ZeroDivisionError("division by zero")
 
     monkeypatch.setattr(mtgjson, "watch", mtgjson_watch)
-    result = CliRunner().invoke(app, ["sync"])
+    result = invoke("sync")
     assert calls == ONLINE
     log = config.data_dir() / "errors.log"
     why = f"ZeroDivisionError: division by zero (unexpected; details in {log})"
@@ -377,30 +268,24 @@ def test_a_bug_in_one_source_fails_its_steps_and_the_rest_still_run(vault, monke
     assert before_closing(result.output) == "1 step failed: MTGJSON prices today"
 
 
-def test_a_bug_in_the_scryfall_price_step_is_reported_the_same_way(vault, monkeypatch):
+def test_a_bug_in_the_scryfall_price_step_is_reported_the_same_way(one_deck, monkeypatch):
     def snapshot_prices():
         raise AttributeError("'list' object has no attribute 'get'")
 
     monkeypatch.setattr(scryfall, "snapshot_prices", snapshot_prices)
-    result = CliRunner().invoke(app, ["sync", "--offline"])
+    result = invoke("sync", "--offline")
     why = "AttributeError: 'list' object has no attribute 'get' (unexpected;"
     assert f"Scryfall prices: {why}" in result.output
 
 
-def test_a_database_url_that_cant_be_used_still_keeps_the_prices(tmp_path, monkeypatch):
-    monkeypatch.setenv("HOME", str(tmp_path))
-    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
-    (tmp_path / "config" / "riffle").mkdir(parents=True)
-    (tmp_path / "config" / "riffle" / "config.toml").write_text(
-        'vault = "~/vault"\ndatabase_url = "not a url"\n'
-    )
-    (tmp_path / "vault" / "tcg" / "mtg").mkdir(parents=True)
-    monkeypatch.setattr(scryfall, "snapshot_prices", lambda: (Path("/d/2026-09-26.jsonl.gz"), False))
+def test_a_database_url_that_cant_be_used_still_keeps_the_prices(prices_kept, monkeypatch):
+    config.config_path().write_text('vault = "~/vault"\ndatabase_url = "not a url"\n')
+    (Path.home() / "vault" / "tcg" / "mtg").mkdir(parents=True)
     network(monkeypatch, up_after=0)
     calls: list[str] = []
     online_steps(monkeypatch, calls)
     monkeypatch.setattr(scryfall_catalog, "update", REAL_UPDATE)
-    result = CliRunner().invoke(app, ["sync"])
+    result = invoke("sync")
     assert result.exit_code == 1
     assert calls == [c for c in ONLINE if c != "catalog"]  # every price source, after the failed load
     assert "card catalog: database_url in " in result.output
@@ -410,30 +295,20 @@ def test_a_database_url_that_cant_be_used_still_keeps_the_prices(tmp_path, monke
 # ---- the vault half ---------------------------------------------------------------------------
 
 
-def test_a_missing_vault_is_reported_and_nothing_is_built_there(tmp_path, monkeypatch):
-    monkeypatch.setenv("HOME", str(tmp_path))
-    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
-    (tmp_path / "config" / "riffle").mkdir(parents=True)
-    (tmp_path / "config" / "riffle" / "config.toml").write_text('vault = "~/vault"\nnotes = "games/tcg"\n')
-    monkeypatch.setattr(scryfall, "snapshot_prices", lambda: (Path("/d/2026-09-26.jsonl.gz"), False))
-    notes = tmp_path / "vault" / "games" / "tcg"
-    result = CliRunner().invoke(app, ["sync", "--offline"])
+def test_a_missing_vault_is_reported_and_nothing_is_built_there(mtg, prices_kept):
+    notes, settings = mtg.parent, Path(os.environ["XDG_CONFIG_HOME"])
+    result = invoke("sync", "--offline")
     assert result.exit_code == 1
-    assert f"vault: no notes folder at {notes}; set vault and notes in {tmp_path / 'config'}" in result.output
-    assert not (tmp_path / "vault").exists()
+    assert f"vault: no notes folder at {notes}; set vault and notes in {settings}" in result.output
+    assert not (Path.home() / "vault").exists()
     assert "0 decks" not in result.output
 
 
-def test_a_notes_folder_without_mtg_syncs_without_decks_and_writes_nothing_there(tmp_path, monkeypatch):
-    monkeypatch.setenv("HOME", str(tmp_path))
-    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
-    (tmp_path / "config" / "riffle").mkdir(parents=True)
-    (tmp_path / "config" / "riffle" / "config.toml").write_text('vault = "~/vault"\nnotes = "games/tcg"\n')
-    monkeypatch.setattr(scryfall, "snapshot_prices", lambda: (Path("/d/2026-09-26.jsonl.gz"), False))
-    notes = tmp_path / "vault" / "games" / "tcg"
+def test_a_notes_folder_without_mtg_syncs_without_decks_and_writes_nothing_there(mtg, prices_kept):
+    notes = mtg.parent
     (notes / "one-piece").mkdir(parents=True)
     (notes / "one-piece" / "red-zoro.md").write_text("---\ngame: one-piece\n---\n")
-    result = CliRunner().invoke(app, ["sync", "--offline"])
+    result = invoke("sync", "--offline")
     assert result.exit_code == 0, result.output
     assert f"vault: no MTG decks in {notes}; Riffle reads MTG decks only for now" in result.output
     assert "no deck folder" not in result.output and "set vault and notes" not in result.output
@@ -445,18 +320,12 @@ def test_a_notes_folder_without_mtg_syncs_without_decks_and_writes_nothing_there
 
 
 def test_a_config_from_before_the_notes_setting_still_syncs_and_says_what_to_change(
-    tmp_path, monkeypatch, opened
+    bare_home, bare_mtg, opened, prices_kept
 ):
-    monkeypatch.setenv("HOME", str(tmp_path))
-    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / ".config"))
-    (tmp_path / ".config" / "riffle").mkdir(parents=True)
-    (tmp_path / ".config" / "riffle" / "config.toml").write_text('vault = "~/vault/games"\n')
-    (tmp_path / "vault" / ".obsidian").mkdir(parents=True)
-    mtg = tmp_path / "vault" / "games" / "tcg" / "mtg"
-    (mtg / "modern").mkdir(parents=True)
-    (mtg / "modern" / "burn.md").write_text(NOTE)
-    monkeypatch.setattr(scryfall, "snapshot_prices", lambda: (Path("/d/2026-09-26.jsonl.gz"), False))
-    result = CliRunner().invoke(app, ["sync", "--offline"])
+    config.write_default().write_text('vault = "~/vault/games"\n')
+    (bare_home / "vault" / ".obsidian").mkdir(parents=True)
+    write_burn(bare_mtg)
+    result = invoke("sync", "--offline")
     assert result.exit_code == 0, result.output
     assert (
         "vault setting: ~/.config/riffle/config.toml names no notes folder, "
@@ -464,16 +333,16 @@ def test_a_config_from_before_the_notes_setting_still_syncs_and_says_what_to_cha
         'set vault = "~/vault" and add notes = "games/tcg"'
     ) in result.output
     assert "1 decks · " in result.output
-    assert (mtg / "_generated" / "burn-data.md").exists()
+    assert (bare_mtg / "_generated" / "burn-data.md").exists()
 
 
-def test_a_note_that_isnt_utf8_fails_a_step_naming_it(vault, monkeypatch):
-    (vault / "modern" / "bogles.md").write_bytes(NOTE.encode() + b"caf\xe9\n")
-    result = CliRunner().invoke(app, ["sync", "--offline"])
+def test_a_note_that_isnt_utf8_fails_a_step_naming_it(one_deck, monkeypatch):
+    (one_deck / "modern" / "bogles.md").write_bytes(BURN_NOTE.encode() + b"caf\xe9\n")
+    result = invoke("sync", "--offline")
     assert result.exit_code == 1
     assert "vault notes: skipped, can't read mtg/modern/bogles.md (not UTF-8)" in result.output
     assert "1 decks · " in result.output  # burn still synced
-    assert (vault / "_generated" / "burn-data.md").exists()
+    assert (one_deck / "_generated" / "burn-data.md").exists()
     assert before_closing(result.output) == "1 step failed: vault notes"
 
 
@@ -516,17 +385,17 @@ def test_an_unreadable_lock_file_names_another_run(tmp_path):
     assert cli_common._holder(tmp_path / "missing") == "another riffle run"
 
 
-def test_a_bug_is_still_reported_when_errors_log_cant_be_written(tmp_path, monkeypatch):
-    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path))
-    (tmp_path / "riffle").write_text("a file where the data folder should be")
+def test_a_bug_is_still_reported_when_errors_log_cant_be_written(data_dir):
+    data_dir.parent.mkdir()
+    data_dir.write_text("a file where the data folder should be")
     assert progress.failure(ValueError("bad")) == "ValueError: bad (unexpected)"
     assert progress.failure(OSError()) == "OSError"
 
 
-def test_a_manabox_export_is_copied_whole_then_the_vault_resynced(vault, tmp_path, monkeypatch):
+def test_a_manabox_export_is_copied_whole_then_the_vault_resynced(one_deck, tmp_path, monkeypatch):
     export = tmp_path / "ManaBox_Collection.csv"
     export.write_text("Name,Set code,Collector number,Foil,Quantity\nLightning Bolt,m10,146,normal,4\n")
-    result = CliRunner().invoke(app, ["ingest", "manabox", str(export)])
+    result = invoke("ingest", "manabox", str(export))
     assert result.exit_code == 0, result.output
     stored = config.load().collection_csv
     assert stored.read_bytes() == export.read_bytes()
@@ -551,21 +420,20 @@ def test_watch_says_when_something_changed_in_the_mac_s_time(monkeypatch, denver
     monkeypatch.setattr(cli_sync, "_resync_and_keep_watching", lambda: resyncs.append(1))
     monkeypatch.setattr("time.sleep", nap)
     monkeypatch.setattr(times, "now", lambda: datetime(2026, 9, 28, 9, 41, 7, tzinfo=UTC))
-    output = CliRunner().invoke(app, ["sync", "--watch"]).output
+    output = invoke("sync", "--watch").output
     assert "\n03:41:07 MDT changed: a.md\n" in output and output.rstrip().endswith("stopped")
     assert len(resyncs) == 2  # once at the start, once for the change
 
 
-def test_the_watch_follows_the_deck_notes_the_config_and_the_newest_export(vault, tmp_path):
-    from riffle import config
-
-    (tmp_path / "Downloads").mkdir()
-    (tmp_path / "Downloads" / "ManaBox_Collection.csv").write_text("Name,Quantity\nSol Ring,1\n")
+def test_the_watch_follows_the_deck_notes_the_config_and_the_newest_export(one_deck):
+    downloads = Path.home() / "Downloads"
+    downloads.mkdir()
+    (downloads / "ManaBox_Collection.csv").write_text("Name,Quantity\nSol Ring,1\n")
     watched = cli_sync._watched(config.load())
     assert set(watched) == {
-        str(vault / "modern" / "burn.md"),
+        str(one_deck / "modern" / "burn.md"),
         str(config.config_path()),
-        str(tmp_path / "Downloads" / "ManaBox_Collection.csv"),
+        str(downloads / "ManaBox_Collection.csv"),
     }
 
 
@@ -583,25 +451,20 @@ def test_the_watch_follows_the_deck_notes_the_config_and_the_newest_export(vault
         ),
     ],
 )
-def test_the_sync_says_what_the_card_note_settings_did(vault, monkeypatch, opened, tmp_path, lines, shown):
+def test_the_sync_says_what_the_card_note_settings_did(one_deck, opened, lines, shown):
     if shown:
-        (vault / "_generated" / "cards").mkdir(parents=True)
-        (vault / "_generated" / "cards" / "Sol Ring.md").write_text("old")
-    (tmp_path / "config" / "riffle" / "config.toml").write_text(lines)
-    result = CliRunner().invoke(app, ["sync", "--offline"])
+        (one_deck / "_generated" / "cards").mkdir(parents=True)
+        (one_deck / "_generated" / "cards" / "Sol Ring.md").write_text("old")
+    config.config_path().write_text(lines)
+    result = invoke("sync", "--offline")
     assert result.exit_code == 0, result.output
     assert shown in result.output if shown else "card notes" not in result.output
 
 
-def test_a_vault_with_no_notes_folder_yet_syncs_and_says_where_decks_go(tmp_path, monkeypatch):
-    monkeypatch.setenv("HOME", str(tmp_path))
-    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
-    (tmp_path / "config" / "riffle").mkdir(parents=True)
-    (tmp_path / "config" / "riffle" / "config.toml").write_text('vault = "~/vault"\nnotes = "games/tcg"\n')
-    (tmp_path / "vault").mkdir()
-    monkeypatch.setattr(scryfall, "snapshot_prices", lambda: (Path("/d/2026-09-26.jsonl.gz"), False))
-    result = CliRunner().invoke(app, ["sync", "--offline"])
+def test_a_vault_with_no_notes_folder_yet_syncs_and_says_where_decks_go(mtg, prices_kept):
+    (Path.home() / "vault").mkdir()
+    result = invoke("sync", "--offline")
     assert result.exit_code == 0, result.output
-    notes = tmp_path / "vault" / "games" / "tcg"
+    notes = mtg.parent
     assert f"vault: no notes folder at {notes} yet: Riffle reads MTG decks from its mtg/" in result.output
-    assert list((tmp_path / "vault").iterdir()) == []  # nothing written into the vault
+    assert list((Path.home() / "vault").iterdir()) == []  # nothing written into the vault

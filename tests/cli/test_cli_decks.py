@@ -2,9 +2,9 @@
 filters and sorted by any column."""
 
 import pytest
-from typer.testing import CliRunner
 
-from riffle.cli import app
+from tests.cli.conftest import lines, write_decks
+from tests.conftest import invoke
 
 NOTE = """---
 game: mtg
@@ -22,30 +22,26 @@ colors: {colors}
 """
 
 
-def _vault(tmp_path, monkeypatch, *notes: dict) -> None:
-    """A vault under a scratch HOME (the default vault lives under it) holding these notes. Each
-    is a dict: folder, slug, cards, and any of format, strategy, archetype, colors, checked."""
-    monkeypatch.setenv("HOME", str(tmp_path))
-    mtg = tmp_path / "vault" / "games" / "tcg" / "mtg"
-    for note in notes:
-        path = mtg / note["folder"] / f"{note['slug']}.md"
-        path.parent.mkdir(parents=True, exist_ok=True)
-        checked = f"checked: {note['checked']}\n" if "checked" in note else ""
-        text = NOTE.format(
-            fmt=note.get("format", "modern"),
-            strategy=note.get("strategy", "aggro"),
-            archetype=note.get("archetype", "burn"),
-            colors=note.get("colors", "[R]"),
-            checked=checked,
-            cards=note["cards"],
-        )
-        path.write_text(text, encoding="utf-8")
+def _text(note: dict) -> str:
+    checked = f"checked: {note['checked']}\n" if "checked" in note else ""
+    return NOTE.format(
+        fmt=note.get("format", "modern"),
+        strategy=note.get("strategy", "aggro"),
+        archetype=note.get("archetype", "burn"),
+        colors=note.get("colors", "[R]"),
+        checked=checked,
+        cards=note["cards"],
+    )
+
+
+def _vault(mtg, *notes: dict) -> None:
+    """The test config's vault holding these notes. Each is a dict: folder, slug, cards, and any
+    of format, strategy, archetype, colors, checked."""
+    write_decks(mtg, notes, _text)
 
 
 def decks(*args: str, code: int = 0) -> list[str]:
-    result = CliRunner().invoke(app, ["decks", *args])
-    assert result.exit_code == code, result.output
-    return result.output.splitlines()
+    return lines("decks", *args, code=code)
 
 
 AESI = {
@@ -72,19 +68,18 @@ TWIN = {
 WASTES = {"folder": "modern", "slug": "eldrazi", "strategy": "ramp", "colors": "[]", "cards": "60 Wastes"}
 
 
-def test_each_column_is_as_wide_as_its_longest_value_and_the_list_is_by_name(tmp_path, monkeypatch):
-    _vault(tmp_path, monkeypatch, AESI, BURN)
+def test_each_column_is_as_wide_as_its_longest_value_and_the_list_is_by_name(mtg):
+    _vault(mtg, AESI, BURN)
     assert decks() == [
         "burn                                    modern     aggro  R    60 cards  not checked",
         "simic-aesi-tyrant-of-gyre-strait-lands  commander  ramp   GU  100 cards  checked 2026-09-30",
     ]
 
 
-def test_widths_count_terminal_cells_not_characters(tmp_path, monkeypatch):
+def test_widths_count_terminal_cells_not_characters(mtg):
     decomposed = "séance"  # "séance" as macOS can return it: an e, then a combining accent
     _vault(
-        tmp_path,
-        monkeypatch,
+        mtg,
         {"folder": "modern", "slug": decomposed, "cards": "60 Island"},
         {
             "folder": "modern",
@@ -99,16 +94,16 @@ def test_widths_count_terminal_cells_not_characters(tmp_path, monkeypatch):
     ]
 
 
-def test_colorless_is_c_and_a_list_value_is_joined(tmp_path, monkeypatch):
-    _vault(tmp_path, monkeypatch, WASTES, {**BURN, "format": "[legacy, vintage]"})
+def test_colorless_is_c_and_a_list_value_is_joined(mtg):
+    _vault(mtg, WASTES, {**BURN, "format": "[legacy, vintage]"})
     assert decks() == [
         "burn     legacy, vintage  aggro  R  60 cards  not checked",
         "eldrazi  modern           ramp   C  60 cards  not checked",
     ]
 
 
-def test_an_empty_vault_prints_nothing(tmp_path, monkeypatch):
-    _vault(tmp_path, monkeypatch)
+def test_an_empty_vault_prints_nothing(mtg):
+    _vault(mtg)
     assert decks() == []
     assert decks("--format", "modern") == []  # nothing to match isn't a typo
 
@@ -125,41 +120,41 @@ def test_an_empty_vault_prints_nothing(tmp_path, monkeypatch):
         (["--colors", "c"], ["eldrazi"]),
     ],
 )
-def test_filters_narrow_the_list(tmp_path, monkeypatch, args, slugs):
-    _vault(tmp_path, monkeypatch, AESI, BURN, TWIN, WASTES)
+def test_filters_narrow_the_list(mtg, args, slugs):
+    _vault(mtg, AESI, BURN, TWIN, WASTES)
     lines = decks(*args, code=0 if slugs else 1)
     assert [line.split()[0] for line in lines if not line.startswith("no decks")] == slugs
 
 
-def test_filters_that_match_no_deck_together_say_so_and_exit_1(tmp_path, monkeypatch):
-    _vault(tmp_path, monkeypatch, AESI, BURN)
+def test_filters_that_match_no_deck_together_say_so_and_exit_1(mtg):
+    _vault(mtg, AESI, BURN)
     assert decks("--format", "modern", "--strategy", "ramp", code=1) == ["no decks match"]
 
 
-def test_a_value_no_deck_has_names_the_ones_there_are(tmp_path, monkeypatch, plain):
-    _vault(tmp_path, monkeypatch, AESI, BURN)
-    result = CliRunner().invoke(app, ["decks", "--format", "moden"])
+def test_a_value_no_deck_has_names_the_ones_there_are(mtg, plain):
+    _vault(mtg, AESI, BURN)
+    result = invoke("decks", "--format", "moden")
     assert result.exit_code == 2
     said = "Invalid value for '--format': no deck has format moden; the vault has commander, modern"
     assert said in plain(result.output)
 
 
-def test_among_many_values_a_typo_gets_the_close_ones(tmp_path, monkeypatch, plain):
+def test_among_many_values_a_typo_gets_the_close_ones(mtg, plain):
     notes = [{**BURN, "slug": f"deck-{n}", "archetype": f"theme{n}"} for n in range(13)]
-    _vault(tmp_path, monkeypatch, *notes, {**BURN, "slug": "tribal", "archetype": "tribal"})
-    result = CliRunner().invoke(app, ["decks", "--archetype", "tribel"])
+    _vault(mtg, *notes, {**BURN, "slug": "tribal", "archetype": "tribal"})
+    result = invoke("decks", "--archetype", "tribel")
     assert result.exit_code == 2
     assert "no deck has archetype tribel; close: tribal" in plain(result.output)
-    result = CliRunner().invoke(app, ["decks", "--archetype", "zzz"])
+    result = invoke("decks", "--archetype", "zzz")
     assert "no deck has archetype zzz" in plain(result.output) and "close" not in result.output
 
 
 @pytest.mark.parametrize(
     ("args", "why"), [(["--colors", "wx"], "wubrg"), (["--sort", "price"], "one of name")]
 )
-def test_a_bad_color_or_sort_is_refused(tmp_path, monkeypatch, plain, args, why):
-    _vault(tmp_path, monkeypatch, BURN)
-    result = CliRunner().invoke(app, ["decks", *args])
+def test_a_bad_color_or_sort_is_refused(mtg, plain, args, why):
+    _vault(mtg, BURN)
+    result = invoke("decks", *args)
     assert result.exit_code == 2 and why in plain(result.output)
 
 
@@ -173,14 +168,14 @@ def test_a_bad_color_or_sort_is_refused(tmp_path, monkeypatch, plain, args, why)
         ("strategy", ["burn", "twin", "eldrazi", "simic-aesi-tyrant-of-gyre-strait-lands"]),
     ],
 )
-def test_sort_by_a_column_then_by_name(tmp_path, monkeypatch, key, slugs):
-    _vault(tmp_path, monkeypatch, AESI, BURN, TWIN, WASTES)
+def test_sort_by_a_column_then_by_name(mtg, key, slugs):
+    _vault(mtg, AESI, BURN, TWIN, WASTES)
     assert [line.split()[0] for line in decks("--sort", key)] == slugs
 
 
-def test_to_buy_reads_the_collection_and_keeps_decks_with_at_most_n_left(tmp_path, monkeypatch, opened):
+def test_to_buy_reads_the_collection_and_keeps_decks_with_at_most_n_left(mtg, opened):
     """No collection: every card but the basics is to buy. Twin needs Sol Ring and Cyclonic Rift."""
-    _vault(tmp_path, monkeypatch, {**TWIN, "cards": "4 Sol Ring\n4 Cyclonic Rift\n52 Forest"}, AESI)
+    _vault(mtg, {**TWIN, "cards": "4 Sol Ring\n4 Cyclonic Rift\n52 Forest"}, AESI)
     assert decks("--to-buy", "1") == [
         "simic-aesi-tyrant-of-gyre-strait-lands  commander  ramp  GU  100 cards  checked 2026-09-30  1 to buy"
     ]
@@ -192,8 +187,8 @@ def test_to_buy_reads_the_collection_and_keeps_decks_with_at_most_n_left(tmp_pat
     assert opened == ["open", "close"] * 3
 
 
-def test_a_note_that_names_no_colors_shows_none(tmp_path, monkeypatch):
-    _vault(tmp_path, monkeypatch, BURN)
-    note = tmp_path / "vault" / "games" / "tcg" / "mtg" / "modern" / "burn.md"
+def test_a_note_that_names_no_colors_shows_none(mtg):
+    _vault(mtg, BURN)
+    note = mtg / "modern" / "burn.md"
     note.write_text(note.read_text().replace("colors: [R]\n", ""))
     assert decks() == ["burn  modern  aggro    60 cards  not checked"]  # an empty column keeps its place

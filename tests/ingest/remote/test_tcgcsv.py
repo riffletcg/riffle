@@ -95,10 +95,9 @@ def lines(game_dir):
 
 
 @pytest.fixture(autouse=True)
-def data_dir(tmp_path, monkeypatch):
-    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path))
+def data_dir(data_dir, monkeypatch):
     monkeypatch.setattr(tcgcsv.times, "now", lambda: NOW)
-    return tmp_path / "riffle"
+    return data_dir
 
 
 @pytest.fixture

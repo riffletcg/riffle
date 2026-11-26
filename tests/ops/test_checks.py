@@ -1,6 +1,5 @@
 """riffle check: every kept price file under the day its own stamp says, made before its fetch."""
 
-import gzip
 import io
 import json
 import lzma
@@ -11,21 +10,13 @@ from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 
 import pytest
-from typer.testing import CliRunner
 
-from riffle import net, runs, times
-from riffle.cli import app
+from riffle import config, net, runs, times
 from riffle.ingest.remote import pricelists
 from riffle.ops import checks, schedule, status
 from riffle.watch import watching
-
-FETCHED = datetime(2026, 9, 27, 20, 51, 50, tzinfo=UTC)
-
-
-@pytest.fixture
-def data(tmp_path, monkeypatch):
-    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path))
-    return tmp_path / "riffle"
+from tests.conftest import invoke
+from tests.ops.conftest import FETCHED, ck, gz, job_log, kept_singles, no_launchctl
 
 
 @pytest.fixture(autouse=True)
@@ -34,18 +25,8 @@ def no_jobs(monkeypatch):
     monkeypatch.setattr(schedule, "status", lambda job=schedule.SYNC: schedule.Status(False, False))
 
 
-def gz(path, body: bytes, fetched: datetime | None = FETCHED) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_bytes(gzip.compress(body, mtime=int(fetched.timestamp()) if fetched else 0))
-
-
 def at(path, when: datetime) -> None:
     os.utime(path, (when.timestamp(), when.timestamp()))
-
-
-def ck(made: str | None = "2026-09-27 13:08:38") -> bytes:
-    meta = {"created_at": made} if made else {}
-    return json.dumps({"meta": meta, "data": [{"id": 1}]}).encode()
 
 
 def guide(stamp: str = "2026-09-27T02:45:12+0200") -> bytes:
@@ -63,7 +44,7 @@ def by_source() -> dict[str, checks.Report]:
     return {rep.source: rep for rep in checks.run()}
 
 
-def test_nothing_kept_is_nothing_wrong(data):
+def test_nothing_kept_is_nothing_wrong():
     reports = checks.run()
     assert [r.source for r in reports] == [
         "Card Kingdom",
@@ -77,15 +58,15 @@ def test_nothing_kept_is_nothing_wrong(data):
     assert all(r.summary() == "nothing kept yet" and not r.problems for r in reports)
 
 
-def test_store_lists_filed_right_and_made_before_their_fetch(data):
-    gz(data / "cardkingdom" / "daily" / "2026-09-27" / "singles.json.gz", ck())
-    gz(data / "cardkingdom" / "daily" / "2026-09-27" / "sealed.json.gz", ck("2026-09-27 13:08:45"))
+def test_store_lists_filed_right_and_made_before_their_fetch(data_dir):
+    gz(data_dir / "cardkingdom" / "daily" / "2026-09-27" / "singles.json.gz", ck())
+    gz(data_dir / "cardkingdom" / "daily" / "2026-09-27" / "sealed.json.gz", ck("2026-09-27 13:08:45"))
     gz(
-        data / "cardkingdom" / "daily" / "2026-09-27" / "stock.json.gz", b"not a list"
+        data_dir / "cardkingdom" / "daily" / "2026-09-27" / "stock.json.gz", b"not a list"
     )  # not a list Riffle keeps
-    gz(data / "cardkingdom" / "aside" / "singles-2026-09-28T130004Z.json.gz", ck(None))
+    gz(data_dir / "cardkingdom" / "aside" / "singles-2026-09-28T130004Z.json.gz", ck(None))
     gz(
-        data / "manapool" / "daily" / "2026-09-27" / "singles.json.gz",
+        data_dir / "manapool" / "daily" / "2026-09-27" / "singles.json.gz",
         b'{"meta":{"as_of":"2026-09-27T20:24:16Z"}}',
     )
     found = by_source()
@@ -99,8 +80,8 @@ def test_store_lists_filed_right_and_made_before_their_fetch(data):
     assert found["Mana Pool"].notes == ["read as UTC, each list was made 27m 34s before it was fetched"]
 
 
-def test_every_way_a_store_list_can_be_wrong(data):
-    daily = data / "cardkingdom" / "daily"
+def test_every_way_a_store_list_can_be_wrong(data_dir):
+    daily = data_dir / "cardkingdom" / "daily"
     gz(daily / "2026-09-28" / "singles.json.gz", ck())  # the 27th's list under the 28th
     gz(daily / "2026-09-29" / "singles.json.gz", ck(None))
     gz(
@@ -121,8 +102,8 @@ def test_every_way_a_store_list_can_be_wrong(data):
     assert by_source()["Card Kingdom"].summary() == "4 lists: 4 wrong"  # one a day: no "over"
 
 
-def test_cardmarket_guides(data):
-    daily = data / "cardmarket" / "daily"
+def test_cardmarket_guides(data_dir):
+    daily = data_dir / "cardmarket" / "daily"
     gz(daily / "2026-09-27" / "mtg.json.gz", guide())
     gz(daily / "2026-09-28" / "fab.json.gz", guide())  # the 27th's
     gz(daily / "2026-09-28" / "op.json.gz", b'{"version": 1}')
@@ -143,7 +124,7 @@ def test_cardmarket_guides(data):
     ]
 
 
-def test_mtgjson_files(data):
+def test_mtgjson_files(data_dir):
     for folder, name, inside in [
         ("daily", "2026-09-27", b'{"meta": {"date": "2026-09-27", "version": "5.3.0"}, "data": {}}'),
         ("90-days", "2026-09-27", b'{"meta": {"date": "2026-09-27"}}'),
@@ -151,11 +132,11 @@ def test_mtgjson_files(data):
         ("daily", "2026-09-29", b"{}"),
         ("daily", "2026-09-30", b'{"meta": {"date": "2026-09-30"}}'),
     ]:
-        path = data / "mtgjson" / folder / f"{name}.json.xz"
+        path = data_dir / "mtgjson" / folder / f"{name}.json.xz"
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(lzma.compress(inside))
         at(path, FETCHED if name != "2026-09-30" else datetime(2026, 9, 29, 23, 0, tzinfo=UTC))
-    (data / "mtgjson" / "daily" / "2026-10-01.json.xz").write_bytes(b"not xz")
+    (data_dir / "mtgjson" / "daily" / "2026-10-01.json.xz").write_bytes(b"not xz")
     rep = by_source()["MTGJSON"]
     assert rep.summary() == "6 files: 4 wrong"
     assert rep.problems == [
@@ -166,8 +147,8 @@ def test_mtgjson_files(data):
     ]
 
 
-def test_goatbots_days(data):
-    daily = data / "goatbots" / "daily"
+def test_goatbots_days(data_dir):
+    daily = data_dir / "goatbots" / "daily"
     daily.mkdir(parents=True)
     for name, body in [
         ("2026-09-27", zipped("price-history-2026-09-27.txt")),
@@ -187,8 +168,8 @@ def test_goatbots_days(data):
     ]
 
 
-def test_goatbots_whole_years_run_to_dec_31(data):
-    yearly = data / "goatbots" / "yearly"
+def test_goatbots_whole_years_run_to_dec_31(data_dir):
+    yearly = data_dir / "goatbots" / "yearly"
     yearly.mkdir(parents=True)
     for name, body in [
         ("2021", zipped("price-history-2020-12-31.txt")),
@@ -216,8 +197,8 @@ def price_lines(*sets: tuple[int, str | None]) -> bytes:
     )
 
 
-def test_tcgcsv_sets_from_a_later_refresh_and_games_unfinished(data):
-    day = data / "tcgcsv" / "daily" / "2026-09-27"
+def test_tcgcsv_sets_from_a_later_refresh_and_games_unfinished(data_dir):
+    day = data_dir / "tcgcsv" / "daily" / "2026-09-27"
     day.mkdir(parents=True)
     (day / "last-updated.txt").write_text("2026-09-27T20:04:59+0000")
     at(day / "last-updated.txt", FETCHED)
@@ -240,7 +221,7 @@ def test_tcgcsv_sets_from_a_later_refresh_and_games_unfinished(data):
     for game in ("pokemon", "starwars", "zombie-world-order-tcg"):
         (day / game).mkdir()
         (day / game / "groups.json").write_text("{}")
-    unstamped = data / "tcgcsv" / "daily" / "2026-09-29" / "mtg"
+    unstamped = data_dir / "tcgcsv" / "daily" / "2026-09-29" / "mtg"
     gz(unstamped / "prices.jsonl.gz", late)  # no stamp for the day: sets can't be checked
     rep = by_source()["tcgcsv"]
     assert rep.problems == [
@@ -257,8 +238,8 @@ def test_tcgcsv_sets_from_a_later_refresh_and_games_unfinished(data):
     ]
 
 
-def test_tcgcsv_days(data):
-    daily = data / "tcgcsv" / "daily"
+def test_tcgcsv_days(data_dir):
+    daily = data_dir / "tcgcsv" / "daily"
     for name, stamp, fetched in [
         ("2026-09-26", "2026-09-26T20:05:50+0000", FETCHED),
         ("2026-09-27", "2026-09-26T20:05:50+0000", FETCHED),
@@ -280,8 +261,8 @@ def test_tcgcsv_days(data):
     ]
 
 
-def test_scryfall_days(data):
-    daily = data / "scryfall" / "daily"
+def test_scryfall_days(data_dir):
+    daily = data_dir / "scryfall" / "daily"
     gz(daily / "2026-09-27.jsonl.gz", b"{}\n")
     gz(daily / "2026-09-28.jsonl.gz", b"{}\n")  # kept on the 27th
     gz(daily / "2026-09-29.jsonl.gz", b"{}\n", fetched=None)
@@ -296,7 +277,7 @@ def test_scryfall_days(data):
 
 def scryfall_publishes(kind: str, n: int, last: datetime, how: str = "kept") -> None:
     """n publishes of a bulk type in Scryfall's check log, every 12 hours to last."""
-    log = data_dir_of() / "scryfall" / "bulk" / "checks.jsonl"
+    log = config.data_dir() / "scryfall" / "bulk" / "checks.jsonl"
     log.parent.mkdir(parents=True, exist_ok=True)
     with log.open("a") as f:
         for i in range(n):
@@ -304,7 +285,7 @@ def scryfall_publishes(kind: str, n: int, last: datetime, how: str = "kept") -> 
             f.write(json.dumps({"type": kind, "stamp": stamp, how: f"{stamp}.jsonl.gz"}) + "\n")
 
 
-def test_scryfall_s_bulk_types_are_judged_for_lateness(data, monkeypatch):
+def test_scryfall_s_bulk_types_are_judged_for_lateness(monkeypatch):
     """By their publishes, a publish found the same as one kept too (rulings, most days)."""
     last = datetime(2026, 9, 27, 21, 5, tzinfo=UTC)
     scryfall_publishes("default_cards", 16, last)
@@ -324,9 +305,9 @@ def test_scryfall_s_bulk_types_are_judged_for_lateness(data, monkeypatch):
     )
 
 
-def test_riffle_check_says_all_right(data):
-    gz(data / "cardkingdom" / "daily" / "2026-09-27" / "singles.json.gz", ck())
-    result = CliRunner().invoke(app, ["check"])
+def test_riffle_check_says_all_right(data_dir):
+    gz(data_dir / "cardkingdom" / "daily" / "2026-09-27" / "singles.json.gz", ck())
+    result = invoke("check")
     assert result.exit_code == 0
     lines = result.output.splitlines()
     assert lines[0] == "Card Kingdom  1 list: all right"
@@ -334,10 +315,10 @@ def test_riffle_check_says_all_right(data):
     assert "Scryfall      nothing kept yet" in lines
 
 
-def test_riffle_check_names_each_file_dated_wrong_and_exits_1(data):
-    gz(data / "cardkingdom" / "daily" / "2026-09-28" / "singles.json.gz", ck())
-    gz(data / "cardmarket" / "daily" / "2026-09-28" / "fab.json.gz", guide())
-    result = CliRunner().invoke(app, ["check"])
+def test_riffle_check_names_each_file_dated_wrong_and_exits_1(data_dir):
+    gz(data_dir / "cardkingdom" / "daily" / "2026-09-28" / "singles.json.gz", ck())
+    gz(data_dir / "cardmarket" / "daily" / "2026-09-28" / "fab.json.gz", guide())
+    result = invoke("check")
     assert result.exit_code == 1
     assert (
         "  ! cardkingdom/daily/2026-09-28/singles.json.gz: made on 2026-09-27, kept under 2026-09-28"
@@ -367,7 +348,7 @@ def three_lists() -> dict:
     return runs.kept(pricelists.lists_dir(pricelists.CARD_KINGDOM[0]))
 
 
-def test_watched_lists_kept_as_logged_are_all_right(data, monkeypatch):
+def test_watched_lists_kept_as_logged_are_all_right(monkeypatch):
     monkeypatch.setattr(times, "now", lambda: datetime(2026, 9, 28, 2, 40, tzinfo=UTC))
     assert len(three_lists()) == 3
     rep = by_source()["Card Kingdom"]
@@ -393,7 +374,7 @@ def singles_note(at: datetime) -> str:
     return note.replace(f"in {n} run{'s' * (n != 1)}", "in N runs")
 
 
-def test_a_list_is_late_past_its_margin_times_its_longest_gap_in_30_days(data, monkeypatch):
+def test_a_list_is_late_past_its_margin_times_its_longest_gap_in_30_days(monkeypatch):
     last = every_three_hours(16)  # 15 gaps of 3 hours: the bar is 1.25 x 3 h = 3 h 45 m
     monkeypatch.setattr(times, "now", lambda: last + timedelta(hours=3, minutes=44))
     assert singles_note(last) == "singles: 16 kept in N runs, one every 3h 00m lately"
@@ -404,7 +385,7 @@ def test_a_list_is_late_past_its_margin_times_its_longest_gap_in_30_days(data, m
     )
 
 
-def test_a_list_that_often_runs_past_its_longest_gap_learns_a_wider_margin(data, monkeypatch):
+def test_a_list_that_often_runs_past_its_longest_gap_learns_a_wider_margin(monkeypatch):
     last = every_three_hours(18, longer={15: 5, 17: 7})  # 5 h is 1.67 x the longest before it, 7 h 1.4 x
     monkeypatch.setattr(times, "now", lambda: last + timedelta(hours=9))
     assert singles_note(last) == (
@@ -412,14 +393,14 @@ def test_a_list_that_often_runs_past_its_longest_gap_learns_a_wider_margin(data,
     )  # 9 h is under 1.40 x 7 h: an irregular list, not a late one
 
 
-def test_a_kept_file_changed_or_missing_is_named(data):
+def test_a_kept_file_changed_or_missing_is_named(data_dir):
     files = three_lists()
     diff = files["2026-09-27T230838Z"]
     diff.write_bytes(diff.read_bytes() + b"x")
     files["2026-09-28T020838Z"].unlink()
 
     def rel(path: Path) -> str:
-        return path.relative_to(data).as_posix()
+        return path.relative_to(data_dir).as_posix()
 
     assert by_source()["Card Kingdom"].problems == [
         f"{rel(diff)}: changed since it was kept",
@@ -427,17 +408,17 @@ def test_a_kept_file_changed_or_missing_is_named(data):
     ]
 
 
-def test_a_damaged_copy_of_a_base_says_the_other_is_whole(data):
+def test_a_damaged_copy_of_a_base_says_the_other_is_whole(data_dir):
     files = three_lists()
     copy = runs.copies(files["2026-09-27T200838Z"].parent)[1]
     copy.write_bytes(b"damaged")
     assert by_source()["Card Kingdom"].problems == [
-        f"{copy.relative_to(data).as_posix()}: changed since it was kept; its other copy is whole, "
+        f"{copy.relative_to(data_dir).as_posix()}: changed since it was kept; its other copy is whole, "
         "and the next list kept writes it again"
     ]
 
 
-def test_a_watched_list_made_after_its_fetch_means_the_clock_isn_t_pacific(data):
+def test_a_watched_list_made_after_its_fetch_means_the_clock_isn_t_pacific():
     watched("2026-09-27 13:08:38", datetime(2026, 9, 27, 19, 0, tzinfo=UTC))
     (problem,) = by_source()["Card Kingdom"].problems
     assert problem.endswith(
@@ -446,7 +427,7 @@ def test_a_watched_list_made_after_its_fetch_means_the_clock_isn_t_pacific(data)
     )
 
 
-def test_a_watch_log_it_can_t_read_is_named_by_its_month(data):
+def test_a_watch_log_it_can_t_read_is_named_by_its_month(data_dir):
     three_lists()
     log = watching.log_path("cardkingdom", datetime(2026, 9, 27, tzinfo=UTC))
     with log.open("a") as f:
@@ -454,7 +435,7 @@ def test_a_watch_log_it_can_t_read_is_named_by_its_month(data):
         f.write("{not json\n")
         f.write(json.dumps({"result": "kept", "list": "singles"}) + "\n")
     old = '{"result": "unchanged", "list": "singles"}\n' * 4011 + "{not json\n"
-    (data / "cardkingdom" / "watch.jsonl").write_text(old)  # not moved yet
+    (data_dir / "cardkingdom" / "watch.jsonl").write_text(old)  # not moved yet
     problems = by_source()["Card Kingdom"].problems
     assert problems == [
         "cardkingdom/watch.jsonl: line 4,012 isn't JSON",
@@ -466,10 +447,10 @@ def test_a_watch_log_it_can_t_read_is_named_by_its_month(data):
 # ---- tcgcsv and Cardmarket kept in runs (0033) --------------------------------------
 
 
-def test_a_tcgcsv_game_kept_in_its_runs_is_checked_as_its_record_says(data):
+def test_a_tcgcsv_game_kept_in_its_runs_is_checked_as_its_record_says(data_dir):
     from riffle.ingest.remote import tcgcsv
 
-    day = data / "tcgcsv" / "daily" / "2026-09-27"
+    day = data_dir / "tcgcsv" / "daily" / "2026-09-27"
     (day / "mtg").mkdir(parents=True)
     (day / "last-updated.txt").write_text("2026-09-27T20:04:59+0000")
     at(day / "last-updated.txt", FETCHED)
@@ -486,8 +467,8 @@ def test_a_tcgcsv_game_kept_in_its_runs_is_checked_as_its_record_says(data):
     ]
     assert rep.kept == {"prices": Counter({"2026-09-27": 2})}  # each game's day kept, for riffle status
     record = json.loads((day / "mtg" / "kept.json").read_text())
-    (data / record["file"]).write_bytes(b"damaged")
-    (data / record["file"]).with_name("2026-09-27T200459Z.copy.json.zst").unlink()
+    (data_dir / record["file"]).write_bytes(b"damaged")
+    (data_dir / record["file"]).with_name("2026-09-27T200459Z.copy.json.zst").unlink()
     problems = by_source()["tcgcsv"].problems
     assert (
         "tcgcsv/lists/mtg/2026-09-27T200459Z/2026-09-27T200459Z.json.zst: changed since it was kept"
@@ -497,10 +478,10 @@ def test_a_tcgcsv_game_kept_in_its_runs_is_checked_as_its_record_says(data):
     assert any(p.startswith("tcgcsv/daily/2026-09-27/mtg/kept.json: unreadable (") for p in problems)
 
 
-def test_a_tcgcsv_game_s_products_are_checked_as_their_record_says(data):
+def test_a_tcgcsv_game_s_products_are_checked_as_their_record_says(data_dir):
     from riffle.ingest.remote import tcgcsv
 
-    day = data / "tcgcsv" / "daily" / "2026-09-27"
+    day = data_dir / "tcgcsv" / "daily" / "2026-09-27"
     (day / "mtg").mkdir(parents=True)
     (day / "last-updated.txt").write_text("2026-09-27T20:04:59+0000")
     at(day / "last-updated.txt", FETCHED)
@@ -513,7 +494,7 @@ def test_a_tcgcsv_game_s_products_are_checked_as_their_record_says(data):
     assert rep.problems == ["tcgcsv/daily/2026-09-27/op/products.json: unreadable"]
     assert rep.kept == {"products": Counter({"2026-09-27": 2})}
     record = json.loads((day / "mtg" / tcgcsv.PRODUCTS_KEPT).read_text())
-    (data / record["file"]).write_bytes(b"damaged")
+    (data_dir / record["file"]).write_bytes(b"damaged")
     assert (
         "tcgcsv/products/mtg/2026-09-27T200459Z/2026-09-27T200459Z.json.zst: changed since it was kept; "
         "its other copy is whole, and the next list kept writes it again"
@@ -523,19 +504,13 @@ def test_a_tcgcsv_game_s_products_are_checked_as_their_record_says(data):
 def tcgcsv_days(n: int, last: datetime) -> None:
     for k in range(n):
         made = last - timedelta(days=k)
-        folder = data_dir_of() / "tcgcsv" / "daily" / made.date().isoformat()
+        folder = config.data_dir() / "tcgcsv" / "daily" / made.date().isoformat()
         folder.mkdir(parents=True)
         (folder / "last-updated.txt").write_text(made.strftime("%Y-%m-%dT%H:%M:%S%z"))
         at(folder / "last-updated.txt", made + timedelta(hours=2))
 
 
-def data_dir_of():
-    from riffle.config import data_dir
-
-    return data_dir()
-
-
-def test_tcgcsv_s_days_are_judged_for_lateness(data, monkeypatch):
+def test_tcgcsv_s_days_are_judged_for_lateness(monkeypatch):
     last = datetime(2026, 9, 27, 20, 5, tzinfo=UTC)
     tcgcsv_days(5, last)
     monkeypatch.setattr(times, "now", lambda: last + timedelta(hours=1))
@@ -563,13 +538,13 @@ def cardmarket_guides(games: tuple[str, ...], days: int, last: datetime) -> None
             )
 
 
-def test_a_log_file_moved_while_check_reads_is_passed_over(data, monkeypatch):
+def test_a_log_file_moved_while_check_reads_is_passed_over(data_dir, monkeypatch):
     three_lists()
-    monkeypatch.setattr(watching, "files", lambda store: [data / store / "watch.jsonl"])
+    monkeypatch.setattr(watching, "files", lambda store: [data_dir / store / "watch.jsonl"])
     assert by_source()["Card Kingdom"].files == 0
 
 
-def test_cardmarket_guides_kept_in_runs_are_checked_as_their_log_says(data, monkeypatch):
+def test_cardmarket_guides_kept_in_runs_are_checked_as_their_log_says(monkeypatch):
     last = datetime(2026, 9, 28, 0, 47, 45, tzinfo=UTC)
     cardmarket_guides(("mtg", "fab"), 2, last)
     monkeypatch.setattr(times, "now", lambda: last + timedelta(hours=1))
@@ -583,7 +558,7 @@ def test_cardmarket_guides_kept_in_runs_are_checked_as_their_log_says(data, monk
     ]
 
 
-def test_each_cardmarket_game_is_judged_for_lateness_alone(data, monkeypatch):
+def test_each_cardmarket_game_is_judged_for_lateness_alone(monkeypatch):
     last = datetime(2026, 9, 28, 0, 47, 45, tzinfo=UTC)
     cardmarket_guides(("mtg", "fab"), 16, last)
     cardmarket_guides(("op",), 16, last - timedelta(days=2))
@@ -596,10 +571,10 @@ def test_each_cardmarket_game_is_judged_for_lateness_alone(data, monkeypatch):
     ]
 
 
-def test_a_cardmarket_game_learned_is_judged_too(data, monkeypatch):
+def test_a_cardmarket_game_learned_is_judged_too(data_dir, monkeypatch):
     last = datetime(2026, 9, 28, 0, 47, 45, tzinfo=UTC)
     learned = {"cyberpunk": {"id": 23, "category": "Cyberpunk Single", "found": "2026-09-01T010000Z"}}
-    games = data / "cardmarket" / "games.json"
+    games = data_dir / "cardmarket" / "games.json"
     games.parent.mkdir(parents=True)
     games.write_text(json.dumps({"looked": "2026-09-28T010000Z", "games": learned}))
     cardmarket_guides(("mtg",), 16, last)
@@ -621,7 +596,7 @@ def one_list(store: str, name: str, folder, days: int, last: datetime, body) -> 
         watching.log(store, entry | {"day": made.date().isoformat()})
 
 
-def test_mtgjson_builds_kept_in_runs_are_checked_as_their_log_says(data, monkeypatch):
+def test_mtgjson_builds_kept_in_runs_are_checked_as_their_log_says(data_dir, monkeypatch):
     from riffle.ingest.remote import mtgjson
 
     last = datetime(2026, 9, 29, 6, 12, 38, tzinfo=UTC)
@@ -630,8 +605,8 @@ def test_mtgjson_builds_kept_in_runs_are_checked_as_their_log_says(data, monkeyp
     rep = by_source()["MTGJSON"]
     assert rep.files == 2 and rep.problems == [] and rep.summary() == "2 files: all right"
     assert rep.notes == ["lateness judged from 14 gaps, 1 so far"]
-    (data / "mtgjson" / "aside").mkdir()
-    (data / "mtgjson" / "aside" / "AllPricesToday-2026-09-29T141000Z.json.xz").write_bytes(b"")
+    (data_dir / "mtgjson" / "aside").mkdir()
+    (data_dir / "mtgjson" / "aside" / "AllPricesToday-2026-09-29T141000Z.json.xz").write_bytes(b"")
     watching.log(
         "mtgjson", {"at": "2026-09-29T141500Z", "list": "prices-today", "result": "kept", "day": "x"}
     )
@@ -643,7 +618,7 @@ def test_mtgjson_builds_kept_in_runs_are_checked_as_their_log_says(data, monkeyp
     ]
 
 
-def test_goatbots_lists_kept_in_runs_are_checked_and_judged_for_lateness(data, monkeypatch):
+def test_goatbots_lists_kept_in_runs_are_checked_and_judged_for_lateness(monkeypatch):
     from riffle.ingest.remote import goatbots
 
     last = datetime(2026, 9, 29, 3, 15, 20, tzinfo=UTC)
@@ -671,7 +646,7 @@ def test_goatbots_lists_kept_in_runs_are_checked_and_judged_for_lateness(data, m
     )
 
 
-def test_mtgjson_s_catalogs_are_checked_and_judged_with_its_prices(data, monkeypatch):
+def test_mtgjson_s_catalogs_are_checked_and_judged_with_its_prices(monkeypatch):
     from riffle.ingest.remote import mtgjson
 
     last = datetime(2026, 9, 29, 6, 12, 38, tzinfo=UTC)
@@ -686,7 +661,7 @@ def test_mtgjson_s_catalogs_are_checked_and_judged_with_its_prices(data, monkeyp
     assert any("changed since it was kept" in problem for problem in by_source()["MTGJSON"].problems)
 
 
-def test_goatbots_cards_and_cardmarket_product_lists_are_checked_too(data, monkeypatch):
+def test_goatbots_cards_and_cardmarket_product_lists_are_checked_too(monkeypatch):
     from riffle.ingest.remote import cardmarket, goatbots
 
     last = datetime(2026, 9, 29, 3, 15, 19, tzinfo=UTC)
@@ -705,7 +680,7 @@ def test_goatbots_cards_and_cardmarket_product_lists_are_checked_too(data, monke
     assert "lateness judged from 14 gaps, 1 so far" in reports["Cardmarket"].notes
 
 
-def test_one_list_of_several_waiting_to_be_judged_is_said_as_one(data, monkeypatch):
+def test_one_list_of_several_waiting_to_be_judged_is_said_as_one(monkeypatch):
     from riffle.ingest.remote import mtgjson
 
     last = datetime(2026, 9, 29, 6, 12, 38, tzinfo=UTC)
@@ -718,22 +693,15 @@ def test_one_list_of_several_waiting_to_be_judged_is_said_as_one(data, monkeypat
 # ---- the days with nothing kept, and the days short of what a list owes ---------------------
 
 
-def kept_singles(*days: str) -> None:
-    """Card Kingdom's singles kept whole under each day: made at 13:08 Pacific, fetched 43 minutes on."""
-    for day in days:
-        fetched = datetime.fromisoformat(f"{day}T13:51:50").replace(tzinfo=pricelists.PACIFIC)
-        gz(data_dir_of() / "cardkingdom" / "daily" / day / "singles.json.gz", ck(f"{day} 13:08:38"), fetched)
-
-
-def test_check_names_a_day_with_nothing_kept_between_days_kept_and_status_marks_it(data):
+def test_check_names_a_day_with_nothing_kept_between_days_kept_and_status_marks_it():
     kept_singles("2026-09-25", "2026-09-26", "2026-09-28")
-    result = CliRunner().invoke(app, ["check"])
+    result = invoke("check")
     assert result.exit_code == 0, result.output
     assert result.output.splitlines()[0] == "Card Kingdom  3 lists: 1 day with nothing kept (2026-09-27)"
     row = status.source_rows()[0]
     assert status.cells(row, status.window(date(2026, 9, 28), 4)) == ["⣿", "⣿", "✗", "⣿"]
     kept_singles("2026-09-27")
-    assert CliRunner().invoke(app, ["check"]).output.splitlines()[0] == ("Card Kingdom  4 lists: all right")
+    assert invoke("check").output.splitlines()[0] == ("Card Kingdom  4 lists: all right")
 
 
 @pytest.mark.parametrize(
@@ -814,7 +782,7 @@ def hourly_singles(days: dict[str, list[int]]) -> None:
 HOURLY = list(range(24))
 
 
-def test_a_whole_day_with_fewer_than_nine_tenths_of_a_list_s_expected_count_is_named(data, monkeypatch):
+def test_a_whole_day_with_fewer_than_nine_tenths_of_a_list_s_expected_count_is_named(monkeypatch):
     monkeypatch.setattr(times, "now", lambda: datetime(2026, 10, 15, 10, 0, tzinfo=UTC))  # 03:00 Pacific
     hourly_singles(
         {
@@ -825,14 +793,14 @@ def test_a_whole_day_with_fewer_than_nine_tenths_of_a_list_s_expected_count_is_n
         }
     )
     assert by_source()["Card Kingdom"].short == ["singles: fewer than 24 lists on 2026-10-14 (19)"]
-    result = CliRunner().invoke(app, ["check"])
+    result = invoke("check")
     assert result.exit_code == 0, result.output
     assert result.output.splitlines()[0] == (
         "Card Kingdom  50 lists over 4 days: singles: fewer than 24 lists on 2026-10-14 (19)"
     )
 
 
-def test_a_list_s_first_day_and_the_store_s_today_are_never_short_nor_a_day_with_its_count(data, monkeypatch):
+def test_a_list_s_first_day_and_the_store_s_today_are_never_short_nor_a_day_with_its_count(monkeypatch):
     monkeypatch.setattr(times, "now", lambda: datetime(2026, 10, 15, 10, 0, tzinfo=UTC))
     hourly_singles(
         {"2026-10-12": [20, 21, 22, 23], "2026-10-13": HOURLY, "2026-10-14": HOURLY, "2026-10-15": [0, 1, 2]}
@@ -840,7 +808,7 @@ def test_a_list_s_first_day_and_the_store_s_today_are_never_short_nor_a_day_with
     assert by_source()["Card Kingdom"].short == []
 
 
-def test_more_than_five_short_days_are_counted_past_the_fifth(data, monkeypatch):
+def test_more_than_five_short_days_are_counted_past_the_fifth(monkeypatch):
     monkeypatch.setattr(times, "now", lambda: datetime(2026, 10, 21, 10, 0, tzinfo=UTC))
     six = HOURLY[:6]
     hourly_singles(
@@ -852,13 +820,13 @@ def test_more_than_five_short_days_are_counted_past_the_fifth(data, monkeypatch)
     ]
 
 
-def test_a_list_with_no_usual_gap_yet_isn_t_judged_for_short_days(data, monkeypatch):
+def test_a_list_with_no_usual_gap_yet_isn_t_judged_for_short_days(monkeypatch):
     monkeypatch.setattr(times, "now", lambda: datetime(2026, 10, 15, 10, 0, tzinfo=UTC))
     hourly_singles({"2026-10-12": [22, 23], "2026-10-13": [0, 1, 2, 3, 4], "2026-10-14": [0, 1]})
     assert by_source()["Card Kingdom"].short == []
 
 
-def test_a_list_kept_with_nothing_in_its_watch_log_isn_t_judged_for_short_days(data, monkeypatch):
+def test_a_list_kept_with_nothing_in_its_watch_log_isn_t_judged_for_short_days(monkeypatch):
     monkeypatch.setattr(times, "now", lambda: datetime(2026, 10, 15, 10, 0, tzinfo=UTC))
     plist = pricelists.CARD_KINGDOM[0]
     for hour in range(16):
@@ -867,16 +835,13 @@ def test_a_list_kept_with_nothing_in_its_watch_log_isn_t_judged_for_short_days(d
     assert by_source()["Card Kingdom"].short == []
 
 
-def test_check_exits_1_over_a_job_log_it_can_t_read(data, tmp_path, monkeypatch, unreadable):
-    monkeypatch.setenv("HOME", str(tmp_path))
+def test_check_exits_1_over_a_job_log_it_can_t_read(monkeypatch, unreadable):
     monkeypatch.setattr(
         schedule, "status", lambda job=schedule.SYNC: schedule.Status(True, True, runs="3", last_exit="0")
     )
-    log = schedule.log_path(schedule.watch_job("manapool"))
-    log.parent.mkdir(parents=True, exist_ok=True)
-    log.write_text("2026-10-19 01:26:10 UTC  riffle watch manapool\n01:26:20  exited 0 after 9.8s\n")
-    unreadable(log)
-    result = CliRunner().invoke(app, ["check"])
+    log = "2026-10-19 01:26:10 UTC  riffle watch manapool\n01:26:20  exited 0 after 9.8s\n"
+    unreadable(job_log(schedule.watch_job("manapool"), log))
+    result = invoke("check")
     assert result.exit_code == 1, result.output
     assert (
         "jobs          watch-manapool.log: unreadable (Permission denied); failures in the last 24 h unknown"
@@ -893,19 +858,17 @@ def watch_runs(store: str, counts: dict[str, int]) -> None:
             f"{start + k * timedelta(minutes=5):%Y-%m-%d %H:%M:%S} UTC  riffle watch {store}"
             for k in range(n)
         ]
-    path = schedule.log_path(schedule.watch_job(store))
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text("\n".join(lines) + "\n")
+    job_log(schedule.watch_job(store), "\n".join(lines) + "\n")
 
 
-def test_check_names_each_day_of_the_last_two_weeks_a_job_ran_too_rarely_a_line_each(data, monkeypatch):
+def test_check_names_each_day_of_the_last_two_weeks_a_job_ran_too_rarely_a_line_each(monkeypatch):
     monkeypatch.setattr(times, "now", lambda: datetime(2026, 10, 22, 12, 0, tzinfo=UTC))
     monkeypatch.setattr(
         schedule, "status", lambda job=schedule.SYNC: schedule.Status(True, True, last_exit="0")
     )
     days = {f"2026-10-{d:02d}": 288 for d in range(5, 22)}
     watch_runs("manapool", days | {"2026-10-05": 3, "2026-10-06": 30, "2026-10-10": 30, "2026-10-15": 100})
-    result = CliRunner().invoke(app, ["check"])
+    result = invoke("check")
     assert result.exit_code == 0, result.output
     assert result.output.splitlines()[-2:] == [
         "jobs          1 of 8 jobs started too few runs on 2026-10-10, the fewest watch-manapool, 30 of 288",
@@ -915,13 +878,10 @@ def test_check_names_each_day_of_the_last_two_weeks_a_job_ran_too_rarely_a_line_
     assert "2026-10-06" not in result.output
 
 
-def test_check_judges_no_jobs_where_launchctl_can_t_be_asked(data, monkeypatch):
-    def no_launchctl(job: schedule.Job = schedule.SYNC) -> schedule.Status:
-        raise FileNotFoundError("launchctl")
-
+def test_check_judges_no_jobs_where_launchctl_can_t_be_asked(monkeypatch):
     monkeypatch.setattr(times, "now", lambda: datetime(2026, 10, 8, 12, 0, tzinfo=UTC))
     monkeypatch.setattr(schedule, "status", no_launchctl)
     watch_runs("manapool", {"2026-10-05": 3, "2026-10-06": 30, "2026-10-07": 288})
-    result = CliRunner().invoke(app, ["check"])
+    result = invoke("check")
     assert result.exit_code == 0, result.output
     assert not [line for line in result.output.splitlines() if line.startswith("jobs")]

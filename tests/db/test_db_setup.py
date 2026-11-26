@@ -3,22 +3,19 @@
 import subprocess
 
 import pytest
-from typer.testing import CliRunner
 
 from riffle import config, db
-from riffle.cli import app
 from riffle.db import compose, migrate
+from tests.conftest import NO_DOCKER, invoke
 
 
-def test_database_url_defaults_to_local_postgres_without_a_password(tmp_path, monkeypatch):
-    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+def test_database_url_defaults_to_local_postgres_without_a_password(no_config):
     assert config.load().database_url == "postgresql+psycopg://tcg@localhost:5432/tcg"
     config.write_default()
     assert config.load().database_url == config.DEFAULT_DATABASE_URL  # the written file says the same
 
 
-def test_database_url_from_config(tmp_path, monkeypatch):
-    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+def test_database_url_from_config(no_config):
     config.write_default().write_text('database_url = "postgresql+psycopg://tcg@server:5432/tcg"\n')
     assert config.load().database_url == "postgresql+psycopg://tcg@server:5432/tcg"
 
@@ -64,20 +61,18 @@ def test_db_up_explains_what_is_missing(tmp_path):
 
 
 @pytest.mark.parametrize("command", ["status", "upgrade"])
-def test_db_commands_say_how_to_start_an_unreachable_server(tmp_path, monkeypatch, command):
-    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+def test_db_commands_say_how_to_start_an_unreachable_server(no_config, command):
     config.write_default().write_text('database_url = "postgresql+psycopg://tcg@127.0.0.1:1/tcg"\n')
-    result = CliRunner().invoke(app, ["db", command])
+    result = invoke("db", command)
     assert result.exit_code == 1
     assert "can't reach Postgres at postgresql+psycopg://tcg@127.0.0.1:1/tcg" in result.output
     assert "riffle db up" in result.output
 
 
-def test_a_database_url_that_cant_be_used_names_the_config_not_the_value(tmp_path, monkeypatch, tracker):
+def test_a_database_url_that_cant_be_used_names_the_config_not_the_value(no_config, tracker):
     from riffle.ingest.remote import scryfall_catalog
     from riffle.store import postgres
 
-    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
     path = config.write_default()
     path.write_text('database_url = "tcg:secret@localhost"\n')
     with pytest.raises(db.BadURL, match=f"database_url in {path} can't be used") as e:
@@ -87,16 +82,11 @@ def test_a_database_url_that_cant_be_used_names_the_config_not_the_value(tmp_pat
     assert tracker.outcomes()["card catalog"] == ("fail", str(e.value))
     with pytest.raises(postgres.Unavailable, match="can't be used"), postgres.open_catalog():
         pass
-    result = CliRunner().invoke(app, ["db", "status"])
+    result = invoke("db", "status")
     assert result.exit_code == 1 and "can't be used" in result.output
 
 
 # ---- finding docker, and the database's container -------------------------------------------
-
-NO_DOCKER = (
-    "docker isn't on PATH, in /usr/local/bin, or in /opt/homebrew/bin: install Docker Engine (Linux)"
-    " or OrbStack or Docker Desktop (macOS), and start it"
-)
 
 
 def test_docker_is_docker_on_path_else_the_first_place_that_is_a_file_else_none(tmp_path):

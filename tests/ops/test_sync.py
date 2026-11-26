@@ -2,17 +2,14 @@
 
 from contextlib import contextmanager
 from datetime import date
-from pathlib import Path
 
 import pytest
 
 from riffle import config
 from riffle.ingest.local import manabox
-from riffle.ingest.remote import scryfall, tcgcsv
+from riffle.ingest.remote import tcgcsv
 from riffle.ops import sync
 from riffle.store import postgres
-
-NOTE = "---\ngame: mtg\nformat: modern\n---\n\n```\n4 Lightning Bolt\n```\n"
 
 
 class Output:
@@ -30,20 +27,16 @@ class Output:
 
 
 @pytest.fixture
-def deck(opened, monkeypatch):
-    cfg = config.load()
-    mtg = cfg.mtg_dir
-    (mtg / "modern").mkdir(parents=True)
-    (mtg / "modern" / "burn.md").write_text(NOTE)
-    monkeypatch.setattr(scryfall, "snapshot_prices", lambda: (Path("2026-10-27.jsonl.gz"), False))
-    return mtg
+def burn_note() -> str:
+    """This file's deck has no import heading: its list is the note's first block."""
+    return "---\ngame: mtg\nformat: modern\n---\n\n```\n4 Lightning Bolt\n```\n"
 
 
 def unexpected(*args, **kwargs):
     pytest.fail("an offline operation attempted a download, disk check, or backup")
 
 
-def test_offline_pickup_and_notes_run_without_terminal_output(deck, opened, tracker, monkeypatch, capsys):
+def test_offline_pickup_and_notes_run_without_terminal_output(one_deck, opened, tracker, monkeypatch, capsys):
     cfg = config.load()
     cfg.downloads.mkdir()
     export = cfg.downloads / "ManaBox_Collection.csv"
@@ -62,7 +55,7 @@ def test_offline_pickup_and_notes_run_without_terminal_output(deck, opened, trac
     assert cfg.collection_csv.read_bytes() == export.read_bytes()
     assert cfg.collection_csv.stat().st_mtime_ns == export.stat().st_mtime_ns
     assert len(manabox.kept(cfg.manabox_exports)) == 1
-    assert (deck / "_generated" / "burn-data.md").exists()
+    assert (one_deck / "_generated" / "burn-data.md").exists()
     assert [kind for kind, _v in output.events] == ["synced"]
     result = output.events[0][1]
     assert result.decks == ["burn"] and result.changed_notes == 2
@@ -71,7 +64,7 @@ def test_offline_pickup_and_notes_run_without_terminal_output(deck, opened, trac
     assert capsys.readouterr() == ("", "")
 
 
-def test_a_failed_refresh_step_still_reaches_notes_and_the_final_backup(deck, tracker, monkeypatch):
+def test_a_failed_refresh_step_still_reaches_notes_and_the_final_backup(one_deck, tracker, monkeypatch):
     output = Output()
     snapshot = tcgcsv.Snapshot(date(2026, 10, 27), requests=3)
     monkeypatch.setattr(sync.net, "wait_online", lambda *args, **kwargs: 0)
@@ -86,7 +79,7 @@ def test_a_failed_refresh_step_still_reaches_notes_and_the_final_backup(deck, tr
 
     def backup(tracker, url, warn_elsewhere):
         output.events.append(("backup", (url, warn_elsewhere)))
-        assert (deck / "_generated" / "burn-data.md").exists()
+        assert (one_deck / "_generated" / "burn-data.md").exists()
 
     monkeypatch.setattr(sync.ingest, "refresh", refresh)
     monkeypatch.setattr(sync.ingest, "snapshot_prices", prices)
@@ -109,7 +102,7 @@ def test_a_failed_refresh_step_still_reaches_notes_and_the_final_backup(deck, tr
 
 
 @pytest.mark.parametrize("missing_vault", [False, True])
-def test_network_fallback_keeps_the_online_invocations_backup(deck, tracker, monkeypatch, missing_vault):
+def test_network_fallback_keeps_the_online_invocations_backup(one_deck, tracker, monkeypatch, missing_vault):
     if missing_vault:
         config.config_path().write_text('vault = ""\n')
     output = Output()
@@ -128,15 +121,15 @@ def test_network_fallback_keeps_the_online_invocations_backup(deck, tracker, mon
     assert output.events[-1] == ("backup", True)
     if missing_vault:
         assert tracker.outcomes()["vault"] == ("fail", config.no_vault())
-        assert not (deck / "_generated").exists()
+        assert not (one_deck / "_generated").exists()
     else:
-        assert (deck / "_generated" / "burn-data.md").exists()
+        assert (one_deck / "_generated" / "burn-data.md").exists()
         assert [kind for kind, _v in output.events] == ["no collection", "synced", "backup"]
 
 
 @pytest.mark.parametrize("failure", ["catalog", "inventory"])
 def test_an_unavailable_catalog_or_inventory_closes_the_catalog_and_skips_backup(
-    deck, tracker, monkeypatch, failure
+    one_deck, tracker, monkeypatch, failure
 ):
     closed = []
 
@@ -166,4 +159,4 @@ def test_an_unavailable_catalog_or_inventory_closes_the_catalog_and_skips_backup
 
     assert closed == [True]
     assert [kind for kind, _v in output.events] == ["no collection"]
-    assert not (deck / "_generated").exists()
+    assert not (one_deck / "_generated").exists()

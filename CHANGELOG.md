@@ -7,6 +7,9 @@ Work in progress goes under **Unreleased** and moves into a version heading at r
 ## [Unreleased]
 
 ### Changed
+- Share the tests' repeated setup through `conftest.py` fixtures and helpers. Four price-source test files each had their own fake source; the command runner, the launchctl stand-in, a job's log, a kept Card Kingdom list, and the sync's network and step fakes were written again in each file or imported from one test file into another; and about a hundred lines set `HOME` and the XDG folders by hand, though every test already gets its own. Now there is one fake source, one `invoke` runner, one set of scheduler and sync fakes, and fixtures for the data folder, the vault's deck folder, a one-deck vault, a kept price day, a config folder with no config in it yet, and a home with its config and data under `~/.config` and `~/.local/share`. No test module imports from another. No test is added, removed, or renamed, and none changes what it checks.
+
+### Changed
 - Clarify sync and collection-pickup docstrings and local names, and add a DESIGN walkthrough from the command to source collection, note generation, and backup. Document file writes, offline fallback, failure handling, and watch mode. Command behavior stays the same.
 
 ### Removed

@@ -12,15 +12,13 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
-from typer.testing import CliRunner
 
 from riffle import config
-from riffle.cli import app
 from riffle.config import data_dir
 from riffle.ingest.local import manabox
-from riffle.ingest.remote import scryfall
 from riffle.models import Holding
 from riffle.ops import ingest as workflow
+from tests.conftest import invoke
 
 # ---- exports as ManaBox writes them ---------------------------------------------------
 
@@ -595,29 +593,13 @@ class Home:
 
 
 @pytest.fixture
-def home(tmp_path, monkeypatch, opened):
-    monkeypatch.setenv("HOME", str(tmp_path))
-    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / ".config"))
-    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / ".local" / "share"))
-    (tmp_path / ".config" / "riffle").mkdir(parents=True)
-    (tmp_path / ".config" / "riffle" / "config.toml").write_text(
-        'vault = "~/vault"\nnotes = "games/tcg"\ncard_notes = false\n'
-    )
-    mtg = tmp_path / "vault" / "games" / "tcg" / "mtg"
-    (mtg / "commander").mkdir(parents=True)
-    (mtg / "commander" / "rift.md").write_text(NOTE)
-    (tmp_path / "Downloads").mkdir()
-    data_dir().mkdir(parents=True)
-    monkeypatch.setattr(scryfall, "snapshot_prices", lambda: (tmp_path / "2026-09-26.jsonl.gz", False))
-    return Home(tmp_path, mtg)
-
-
-def run(*args):
-    return CliRunner().invoke(app, list(args))
+def home(bare_home, collection_home):
+    (collection_home / "commander" / "rift.md").write_text(NOTE)
+    return Home(bare_home, collection_home)
 
 
 def sync():
-    return run("sync", "--offline")
+    return invoke("sync", "--offline")
 
 
 # ---- the sync ---------------------------------------------------------------------------
@@ -726,7 +708,7 @@ def test_an_older_kept_export_put_back_by_hand_stays_the_collection_at_the_next_
     home.export("ManaBox_Collection 7.csv", T7, OLD)
     sync()
     before = time.time()
-    put_back = run("ingest", "manabox", str(six))
+    put_back = invoke("ingest", "manabox", str(six))
     assert put_back.exit_code == 0, put_back.output
     assert (
         "restored the export of 2026-10-11 07:10 UTC (manabox/2026-10-11T071014Z.csv); "
@@ -852,7 +834,7 @@ def test_an_export_put_back_by_hand_stays_the_collection_beside_one_dated_ahead_
     six = home.export("ManaBox_Collection 6.csv", T6, BEFORE)
     home.export("ManaBox_Collection 8.csv", later(), NEW)
     sync()
-    assert run("ingest", "manabox", str(six), "--no-sync").exit_code == 0
+    assert invoke("ingest", "manabox", str(six), "--no-sync").exit_code == 0
     assert "picked up Mana" not in sync().output
     assert home.collection.read_text(encoding="utf-8") == export_text(BEFORE)
 
@@ -865,7 +847,7 @@ def test_a_collection_that_cant_be_read_isnt_replaced(home):
     home.collection.chmod(0)
     try:
         result = sync()
-        ingest = run("ingest", "manabox", str(eight), "--no-sync")
+        ingest = invoke("ingest", "manabox", str(eight), "--no-sync")
     finally:
         home.collection.chmod(0o644)
     assert result.exit_code == 1
@@ -897,7 +879,7 @@ def test_a_collection_that_cant_be_written_fails_its_step_and_the_next_sync_take
     assert result.exit_code == 1, result.output
     assert f"! collection: {unwritten}" in result.output
     assert "1 decks · " in result.output
-    ingest = run("ingest", "manabox", str(eight), "--no-sync")
+    ingest = invoke("ingest", "manabox", str(eight), "--no-sync")
     assert ingest.exit_code == 1
     assert ingest.stderr.splitlines() == [unwritten]
     assert home.collection.read_text(encoding="utf-8") == export_text(OLD)
@@ -918,7 +900,7 @@ def test_ingest_makes_a_new_export_the_collection_keeping_the_old_one_first(home
     home.collect(OLD, T7)
     eight = write_export(home.root / "ManaBox_Collection 8.csv", NEW, T8)
     before = time.time()
-    result = run("ingest", "manabox", str(eight), "--no-sync")
+    result = invoke("ingest", "manabox", str(eight), "--no-sync")
     assert result.exit_code == 0, result.output
     assert result.stdout.splitlines() == [
         "ManaBox_Collection 8.csv is the collection now, kept as manabox/2026-10-19T090000Z.csv; "
@@ -939,7 +921,7 @@ def test_ingest_with_no_collection_before_it_has_nothing_to_compare(home):
     home.export("ManaBox_Collection 7.csv", T7, OLD)
     # the newest ManaBox*.csv, passed over for the newest export
     home.fixes(T8)
-    result = run("ingest", "manabox", "--no-sync")
+    result = invoke("ingest", "manabox", "--no-sync")
     assert result.exit_code == 0, result.output
     assert result.stdout.splitlines() == [
         "ManaBox_Collection 7.csv is the collection now, kept as manabox/2026-10-18T084152Z.csv; "
@@ -952,7 +934,7 @@ def test_ingest_with_no_collection_before_it_has_nothing_to_compare(home):
 def test_diff_adds_every_line_of_the_change_indented_after_the_summary(home):
     home.collect(OLD, T7)
     eight = write_export(home.root / "ManaBox_Collection 8.csv", NEW, T8)
-    result = run("ingest", "manabox", str(eight), "--diff", "--no-sync")
+    result = invoke("ingest", "manabox", str(eight), "--diff", "--no-sync")
     assert result.exit_code == 0, result.output
     assert result.stdout.splitlines() == [
         "ManaBox_Collection 8.csv is the collection now, kept as manabox/2026-10-19T090000Z.csv; "
@@ -967,7 +949,7 @@ def test_ingest_restores_a_kept_export_from_any_file_with_its_bytes(home):
     sync()
     put_back = write_export(home.root / "put-back.csv", BEFORE, T8)
     before = time.time()
-    result = run("ingest", "manabox", str(put_back), "--no-sync")
+    result = invoke("ingest", "manabox", str(put_back), "--no-sync")
     assert result.exit_code == 0, result.output
     assert result.stdout.splitlines() == [
         "restored the export of 2026-10-11 07:10 UTC (manabox/2026-10-11T071014Z.csv); "
@@ -982,7 +964,7 @@ def test_ingest_restores_from_the_kept_file_itself_and_diff_lists_the_lines(home
     home.collect(OLD, T7)
     home.export("ManaBox_Collection 6.csv", T6, BEFORE)
     sync()
-    result = run("ingest", "manabox", str(home.history / "2026-10-11T071014Z.csv"), "--diff", "--no-sync")
+    result = invoke("ingest", "manabox", str(home.history / "2026-10-11T071014Z.csv"), "--diff", "--no-sync")
     assert result.exit_code == 0, result.output
     assert result.stdout.splitlines() == [
         "restored the export of 2026-10-11 07:10 UTC (manabox/2026-10-11T071014Z.csv); "
@@ -997,9 +979,9 @@ def test_restoring_an_older_export_never_loses_the_newer_one(home):
     # the collection isn't kept yet
     home.collect(OLD, T7)
     older = write_export(home.root / "ManaBox_Collection 6.csv", BEFORE, T6)
-    assert run("ingest", "manabox", str(older), "--no-sync").exit_code == 0
+    assert invoke("ingest", "manabox", str(older), "--no-sync").exit_code == 0
     assert home.stamps() == ["2026-10-11T071014Z.csv", "2026-10-18T084152Z.csv"]
-    result = run("ingest", "manabox", str(home.history / "2026-10-18T084152Z.csv"), "--no-sync")
+    result = invoke("ingest", "manabox", str(home.history / "2026-10-18T084152Z.csv"), "--no-sync")
     assert result.exit_code == 0, result.output
     assert result.stdout.splitlines() == [
         "restored the export of 2026-10-18 08:41 UTC (manabox/2026-10-18T084152Z.csv); "
@@ -1014,7 +996,7 @@ def test_the_export_that_is_the_collection_already_is_kept_once_and_nothing_is_r
     sync()
     files = home.files()
     written = home.collection.stat().st_mtime_ns
-    result = run("ingest", "manabox", str(seven))
+    result = invoke("ingest", "manabox", str(seven))
     assert result.exit_code == 0, result.output
     assert result.stdout.splitlines() == [ALREADY]
     assert "decks · " not in result.output
@@ -1026,7 +1008,7 @@ def test_diff_on_the_collection_already_compares_it_with_the_kept_export_before_
     home.collect(OLD, T7)
     seven = home.export("ManaBox_Collection 7.csv", T7, OLD)
     sync()
-    alone = run("ingest", "manabox", str(seven), "--diff", "--no-sync")
+    alone = invoke("ingest", "manabox", str(seven), "--diff", "--no-sync")
     assert alone.exit_code == 0, alone.output
     assert alone.stdout.splitlines() == [
         ALREADY,
@@ -1034,7 +1016,7 @@ def test_diff_on_the_collection_already_compares_it_with_the_kept_export_before_
     ]
     home.export("ManaBox_Collection 6.csv", T6, BEFORE)
     sync()
-    result = run("ingest", "manabox", str(seven), "--diff", "--no-sync")
+    result = invoke("ingest", "manabox", str(seven), "--diff", "--no-sync")
     assert result.exit_code == 0, result.output
     assert result.stdout.splitlines() == [
         ALREADY,
@@ -1060,7 +1042,7 @@ def test_diff_on_the_collection_already_compares_it_with_the_kept_export_before_
 def test_ingest_warns_past_half_the_copies_dropped_and_moves_arent_removals(home, rows, summary, warning):
     home.collect(TEN, T7)
     eight = write_export(home.root / "ManaBox_Collection 8.csv", rows, T8)
-    result = run("ingest", "manabox", str(eight), "--no-sync")
+    result = invoke("ingest", "manabox", str(eight), "--no-sync")
     assert result.exit_code == 0, result.output
     assert result.stdout.splitlines() == [
         "ManaBox_Collection 8.csv is the collection now, kept as manabox/2026-10-19T090000Z.csv; "
@@ -1076,7 +1058,7 @@ def test_ingest_that_cant_keep_leaves_the_collection_and_exits_1(home):
     # a file where the history folder would be: nothing can be kept there
     home.history.write_text("a file where the history folder would be")
     written = home.collection.stat().st_mtime_ns
-    result = run("ingest", "manabox", str(eight), "--no-sync")
+    result = invoke("ingest", "manabox", str(eight), "--no-sync")
     assert result.exit_code == 1, result.output
     assert any(
         line.startswith("can't keep the export: ") and line.endswith("; the collection was not replaced")
@@ -1090,7 +1072,7 @@ def test_ingest_that_cant_keep_leaves_the_collection_and_exits_1(home):
 def test_ingest_warns_when_the_exports_columns_changed_and_makes_no_diff(home):
     home.collect(OLD, T7)
     eight = write_export(home.root / "ManaBox_Collection 8.csv", NEW, T8, WITHOUT_BINDER_NAME)
-    result = run("ingest", "manabox", str(eight), "--no-sync")
+    result = invoke("ingest", "manabox", str(eight), "--no-sync")
     assert result.exit_code == 0, result.output
     assert result.stdout.splitlines() == [
         "ManaBox_Collection 8.csv is the collection now, kept as manabox/2026-10-19T090000Z.csv"
@@ -1107,7 +1089,7 @@ def test_diff_on_the_collection_already_names_changed_columns_and_lists_nothing(
     seven = home.export("ManaBox_Collection 7.csv", T7, OLD)
     home.collect(OLD, T7)
     sync()
-    result = run("ingest", "manabox", str(seven), "--diff", "--no-sync")
+    result = invoke("ingest", "manabox", str(seven), "--diff", "--no-sync")
     assert result.exit_code == 0, result.output
     assert result.stdout.splitlines() == [ALREADY]
     assert result.stderr.splitlines() == [
@@ -1117,7 +1099,7 @@ def test_diff_on_the_collection_already_names_changed_columns_and_lists_nothing(
 
 def test_ingest_with_no_export_in_downloads_asks_for_a_path(home, plain):
     home.fixes(T8)
-    result = run("ingest", "manabox")
+    result = invoke("ingest", "manabox")
     assert result.exit_code == 2
     assert "no ManaBox export in ~/Downloads — pass a path" in plain(result.output)
     assert not home.history.exists()
@@ -1126,7 +1108,7 @@ def test_ingest_with_no_export_in_downloads_asks_for_a_path(home, plain):
 def test_ingest_refuses_a_csv_that_isnt_an_export_and_keeps_nothing(home, plain):
     home.collect(OLD, T7)
     fixes = home.fixes(T8)
-    result = run("ingest", "manabox", str(fixes))
+    result = invoke("ingest", "manabox", str(fixes))
     assert result.exit_code == 2
     assert "ManaBox_Collection-5-fixes.csv isn't a ManaBox export: no Name column" in plain(result.output)
     assert home.collection.read_text(encoding="utf-8") == export_text(OLD)
@@ -1139,7 +1121,7 @@ def test_ingest_refuses_a_csv_that_isnt_an_export_and_keeps_nothing(home, plain)
 def test_check_collection_says_no_exports_are_kept_yet_and_keeps_none(home):
     home.collect(OLD, T7)
     home.export("ManaBox_Collection 7.csv", T7, OLD)
-    result = run("check", "collection")
+    result = invoke("check", "collection")
     assert result.exit_code == 0, result.output
     assert result.output.splitlines()[:2] == [
         "collection: 8 copies in ~/.local/share/riffle/collection.csv",
@@ -1154,7 +1136,7 @@ def test_check_collection_counts_the_kept_exports_and_names_the_newest(home):
     manabox.keep(home.collection, home.history)
     # not kept: check keeps nothing
     home.export("ManaBox_Collection 8.csv", T8, NEW)
-    result = run("check", "collection")
+    result = invoke("check", "collection")
     assert result.exit_code == 0, result.output
     assert result.output.splitlines()[:2] == [
         "collection: 8 copies in ~/.local/share/riffle/collection.csv",
@@ -1166,6 +1148,6 @@ def test_check_collection_counts_the_kept_exports_and_names_the_newest(home):
 def test_on_a_terminal_the_newest_export_is_shown_in_the_macs_time(home, on_a_terminal):
     home.collect(OLD, T7)
     manabox.keep(home.collection, home.history)
-    result = run("check", "collection")
+    result = invoke("check", "collection")
     assert result.exit_code == 0, result.output
     assert "exports kept: 1, newest 2026-10-18 02:41 MDT, in ~/.local/share/riffle/manabox" in result.output

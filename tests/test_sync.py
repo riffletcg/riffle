@@ -29,8 +29,7 @@ def _vault(tmp_path):
     return mtg
 
 
-def test_sync_writes_only_machine_zones(tmp_path, cat, monkeypatch):
-    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "data"))
+def test_sync_writes_only_machine_zones(tmp_path, cat):
     mtg = _vault(tmp_path)
     before = (mtg / "commander" / "aesi-lands.md").read_text()
     inv = sync.Inventory([])
@@ -44,9 +43,8 @@ def test_sync_writes_only_machine_zones(tmp_path, cat, monkeypatch):
     assert "3 cards" in data and "[[Cyclonic Rift]]" in data
 
 
-def test_notes_carry_no_date_so_a_day_later_with_the_same_prices_writes_nothing(tmp_path, cat, monkeypatch):
+def test_notes_carry_no_date_so_a_day_later_with_the_same_prices_writes_nothing(tmp_path, cat):
     """S1: each note said `generated: <today>`, so every sync of a new day rewrote all of them."""
-    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "data"))
     mtg = _vault(tmp_path)
     inv = sync.Inventory([])
     assert sync.run(mtg, inv, cat, today="2026-09-21").changed_notes == 2
@@ -58,9 +56,8 @@ def test_notes_carry_no_date_so_a_day_later_with_the_same_prices_writes_nothing(
     assert "generated:" not in (gen / "collection-summary.md").read_text()
 
 
-def test_the_old_price_log_is_closed_once_and_never_appended_to(tmp_path, cat, monkeypatch):
+def test_the_old_price_log_is_closed_once_and_never_appended_to(tmp_path, cat):
     """S2: the price log grew by a line a buy card a day; `riffle prices log` reads the store instead."""
-    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "data"))
     mtg = _vault(tmp_path)
     log = mtg / "_log" / "prices.md"
     log.parent.mkdir(parents=True)
@@ -76,8 +73,7 @@ def test_the_old_price_log_is_closed_once_and_never_appended_to(tmp_path, cat, m
     assert log.read_text() == closed
 
 
-def test_a_vault_without_a_price_log_gets_none(tmp_path, cat, monkeypatch):
-    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "data"))
+def test_a_vault_without_a_price_log_gets_none(tmp_path, cat):
     mtg = _vault(tmp_path)
     sync.run(mtg, sync.Inventory([]), cat, today="2026-09-21")
     assert not (mtg / "_log" / "prices.md").exists()
@@ -87,7 +83,6 @@ def test_the_state_is_saved_once_however_many_decks_changed(tmp_path, cat, monke
     """S3: it was saved after each deck whose list changed, up to 3.6 MB each time."""
     from riffle.export import obsidian
 
-    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "data"))
     mtg = _vault(tmp_path)
     for n in range(50):
         (mtg / "commander" / f"aesi-{n}.md").write_text(NOTE)
@@ -101,7 +96,6 @@ def test_the_state_is_saved_once_however_many_decks_changed(tmp_path, cat, monke
 
 
 def test_a_run_cut_off_partway_saves_the_logs_it_appended(tmp_path, cat, monkeypatch):
-    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "data"))
     mtg = _vault(tmp_path)
     (mtg / "commander" / "zz-last.md").write_text(NOTE)
     real = sync.analyse
@@ -121,8 +115,7 @@ def test_a_run_cut_off_partway_saves_the_logs_it_appended(tmp_path, cat, monkeyp
     assert sync.run(mtg, sync.Inventory([]), cat, today="2026-09-21").versions == ["zz-last"]
 
 
-def test_conflict_copies_are_named_and_never_read(tmp_path, cat, monkeypatch):
-    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "data"))
+def test_conflict_copies_are_named_and_never_read(tmp_path, cat):
     mtg = _vault(tmp_path)
     (mtg / "commander" / "aesi-lands [conflicted].md").write_text(NOTE)
     (mtg / "_log").mkdir()
@@ -149,8 +142,7 @@ def test_notes_are_dated_today_in_utc(monkeypatch):
     assert obsidian.today() == "2026-09-29"
 
 
-def test_versions_log_records_changes_only(tmp_path, cat, monkeypatch):
-    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "data"))
+def test_versions_log_records_changes_only(tmp_path, cat):
     mtg = _vault(tmp_path)
     inv = sync.Inventory([])
     assert sync.run(mtg, inv, cat, today="2026-09-21").versions == ["aesi-lands"]
@@ -162,8 +154,7 @@ def test_versions_log_records_changes_only(tmp_path, cat, monkeypatch):
     assert "\\+ 1 [[Fire|Fire // Ice]]" in log and "\\- 1 [[Sol Ring]]" in log
 
 
-def test_generated_note_not_rewritten_when_unchanged(tmp_path, cat, monkeypatch):
-    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "data"))
+def test_generated_note_not_rewritten_when_unchanged(tmp_path, cat):
     mtg = _vault(tmp_path)
     inv = sync.Inventory([])
     first = sync.run(mtg, inv, cat, today="2026-09-21").changed_notes
@@ -171,8 +162,7 @@ def test_generated_note_not_rewritten_when_unchanged(tmp_path, cat, monkeypatch)
     assert sync.run(mtg, inv, cat, today="2026-09-21").changed_notes == 0
 
 
-def test_generated_note_carries_import_blocks_and_stale_notes_are_pruned(tmp_path, cat, monkeypatch):
-    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "data"))
+def test_generated_note_carries_import_blocks_and_stale_notes_are_pruned(tmp_path, cat):
     mtg = _vault(tmp_path)
     gen = mtg / "_generated"
     gen.mkdir(parents=True)
@@ -185,8 +175,7 @@ def test_generated_note_carries_import_blocks_and_stale_notes_are_pruned(tmp_pat
     assert "✓ 0 own · ○ 3 buy" in data
 
 
-def test_old_dotted_versions_log_is_renamed_not_lost(tmp_path, cat, monkeypatch):
-    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "data"))
+def test_old_dotted_versions_log_is_renamed_not_lost(tmp_path, cat):
     mtg = _vault(tmp_path)
     (mtg / "_log").mkdir(parents=True)
     (mtg / "_log" / "aesi-lands.versions.md").write_text("history\n")
@@ -195,8 +184,7 @@ def test_old_dotted_versions_log_is_renamed_not_lost(tmp_path, cat, monkeypatch)
     assert not (mtg / "_log" / "aesi-lands.versions.md").exists()
 
 
-def test_rename_happens_even_when_the_list_is_unchanged(tmp_path, cat, monkeypatch):
-    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "data"))
+def test_rename_happens_even_when_the_list_is_unchanged(tmp_path, cat):
     mtg = _vault(tmp_path)
     sync.run(mtg, sync.Inventory([]), cat, today="2026-09-21")
     new = mtg / "_log" / "aesi-lands-versions.md"
@@ -205,8 +193,7 @@ def test_rename_happens_even_when_the_list_is_unchanged(tmp_path, cat, monkeypat
     assert new.exists()
 
 
-def test_a_note_that_isnt_utf8_is_skipped_and_named_and_the_rest_carries_on(tmp_path, cat, monkeypatch):
-    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "data"))
+def test_a_note_that_isnt_utf8_is_skipped_and_named_and_the_rest_carries_on(tmp_path, cat):
     mtg = _vault(tmp_path)
     sync.run(mtg, sync.Inventory([]), cat, today="2026-09-21")
     (mtg / "commander" / "aesi-copy.md").write_bytes(NOTE.encode("utf-16"))
@@ -225,11 +212,10 @@ def test_a_note_that_isnt_utf8_is_skipped_and_named_and_the_rest_carries_on(tmp_
 
 
 @pytest.mark.parametrize("state", ['{"aesi-lands": {"hash"', "[]"])
-def test_an_unreadable_sync_state_is_set_aside_and_the_logs_start_again(tmp_path, cat, monkeypatch, state):
-    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "data"))
+def test_an_unreadable_sync_state_is_set_aside_and_the_logs_start_again(tmp_path, cat, data_dir, state):
     mtg = _vault(tmp_path)
     sync.run(mtg, sync.Inventory([]), cat, today="2026-09-21")
-    path = tmp_path / "data" / "riffle" / "sync-state.json"
+    path = data_dir / "sync-state.json"
     path.write_text(state)
     res = sync.run(mtg, sync.Inventory([]), cat, today="2026-09-22")
     [(label, why)] = res.failed
@@ -253,10 +239,9 @@ def test_a_note_is_written_whole_or_not_at_all(tmp_path):
     assert [p.name for p in tmp_path.iterdir()] == ["x-data.md"]  # no part file left behind
 
 
-def test_a_note_that_went_missing_is_written_again_though_nothing_changed(tmp_path, cat, monkeypatch):
+def test_a_note_that_went_missing_is_written_again_though_nothing_changed(tmp_path, cat):
     """C52: a sync service can turn a note into a conflict copy and drop the original. The next
     sync removes the copy and writes the note again, whether or not its deck changed."""
-    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "data"))
     mtg = _vault(tmp_path)
     sync.run(mtg, sync.Inventory([]), cat, today="2026-09-21")
     note = mtg / "_generated" / "aesi-lands-data.md"
@@ -272,8 +257,7 @@ def card_notes(mtg, **how):
     return sync.CardNotes(mtg.parent.parent, mtg.parent, **{"pictures": "link", **how})
 
 
-def test_the_sync_writes_a_note_for_each_card_a_note_links(tmp_path, cat, monkeypatch):
-    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "data"))
+def test_the_sync_writes_a_note_for_each_card_a_note_links(tmp_path, cat):
     mtg = _vault(tmp_path)
     (mtg / "ideas.md").write_text("Try [[Fire // Ice]] and [[Lightning Bolt]], or [[Summon: Bahamut]].")
     (mtg.parent.parent / "Lightning Bolt.md").write_text("a note of the user's, which the link opens")
@@ -297,8 +281,7 @@ def test_the_sync_writes_a_note_for_each_card_a_note_links(tmp_path, cat, monkey
     assert again.card_notes.written == 0
 
 
-def test_card_notes_off_removes_them(tmp_path, cat, monkeypatch):
-    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "data"))
+def test_card_notes_off_removes_them(tmp_path, cat):
     mtg = _vault(tmp_path)
     sync.run(mtg, sync.Inventory([]), cat, card_notes=card_notes(mtg))
     res = sync.run(mtg, sync.Inventory([]), cat)
@@ -306,8 +289,7 @@ def test_card_notes_off_removes_them(tmp_path, cat, monkeypatch):
     assert not (mtg / "_generated" / "cards").exists()
 
 
-def test_pictures_not_fetched_are_named(tmp_path, cat, monkeypatch):
-    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "data"))
+def test_pictures_not_fetched_are_named(tmp_path, cat):
     mtg = _vault(tmp_path)
 
     def down(url, dest):
@@ -329,10 +311,9 @@ def test_pictures_not_fetched_are_named(tmp_path, cat, monkeypatch):
         (KeyError("faces"), "KeyError: 'faces' (unexpected; details in {log})"),
     ],
 )
-def test_card_notes_that_fail_fail_their_step_alone(tmp_path, cat, monkeypatch, error, why):
+def test_card_notes_that_fail_fail_their_step_alone(tmp_path, cat, data_dir, monkeypatch, error, why):
     from riffle.export import cards
 
-    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "data"))
     mtg = _vault(tmp_path)
 
     def fails(*args, **kwargs):
@@ -340,15 +321,14 @@ def test_card_notes_that_fail_fail_their_step_alone(tmp_path, cat, monkeypatch, 
 
     monkeypatch.setattr(cards, "write", fails)
     res = sync.run(mtg, sync.Inventory([]), cat, card_notes=card_notes(mtg))
-    folder, log = mtg / "_generated" / "cards", tmp_path / "data" / "riffle" / "errors.log"
+    folder, log = mtg / "_generated" / "cards", data_dir / "errors.log"
     assert res.failed == [("card notes", why.format(folder=folder, log=log))]
     assert res.decks == ["aesi-lands"] and (mtg / "_generated" / "aesi-lands-data.md").exists()
 
 
-def test_riffle_s_own_tables_link_each_card_by_its_safe_name(tmp_path, cat, monkeypatch):
+def test_riffle_s_own_tables_link_each_card_by_its_safe_name(tmp_path, cat):
     from riffle.models import Holding
 
-    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "data"))
     mtg = tmp_path / "library" / "tcg" / "mtg"
     mtg.mkdir(parents=True)
     note = "---\ngame: mtg\nformat: modern\n---\n\n```\n1 Fire // Ice\n1 Summon: Bahamut\n```\n"

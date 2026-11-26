@@ -13,6 +13,7 @@ import pytest
 from riffle import locks, net, runs
 from riffle.ingest.remote import mtgjson
 from riffle.watch import watching
+from tests.ingest.remote.conftest import AUTO, Auto, Dated
 
 B = mtgjson.BASE
 EVERY_FILE = mtgjson.FILES  # before a test narrows them to AllPricesToday
@@ -49,73 +50,15 @@ def built(day: date) -> datetime:
     return datetime.combine(day, time(6, 12, 38), UTC)
 
 
-class _Auto:
-    """The stamp read from the body, as the real source reads it."""
+class Source(Dated):
+    """MTGJSON: each file's Last-Modified when the day inside was built."""
 
-
-AUTO = _Auto()
-
-
-class Source:
-    """MTGJSON as a fetch, a download and net.fetch_new: url -> body, None (404), or an exception
-    to raise, each body's ETag its hash, its Last-Modified when the day inside was built (or
-    `modified`). Records every url asked for, and the ETags sent."""
-
-    def __init__(
-        self,
-        answers: dict[str, bytes | None | Exception],
-        modified: datetime | None | _Auto = AUTO,
-        tagged: bool = True,
-    ):
-        self.answers = answers
-        self.asked: list[str] = []
-        self.etags: list[str | None] = []
-        self.modified = modified
-        self.tagged = tagged
-
-    def _answer(self, url: str) -> bytes | None:
-        self.asked.append(url)
-        answer = self.answers.get(url)
-        if isinstance(answer, Exception):
-            raise answer
-        return answer
-
-    def fetch(self, url: str) -> bytes | None:
-        return self._answer(url)
-
-    def download(self, url, dest, progress=None):
-        body = self._answer(url)
-        if body is None:
-            return None
-        dest.write_bytes(body)
-        if progress:
-            progress(len(body), len(body))
-        return len(body)
-
-    def _stamp(self, body: bytes) -> datetime | None:
-        if not isinstance(self.modified, _Auto):
-            return self.modified
+    def made(self, body: bytes) -> datetime:
         try:
             found = re.search(rb'"date":"(\d{4}-\d{2}-\d{2})"', lzma.decompress(body)[:512])
             return built(date.fromisoformat(found.group(1).decode()) if found else DAY)
         except (lzma.LZMAError, ValueError):
             return built(DAY)
-
-    def fetch_new(self, url, dest, known, etag=None, accept="*/*", progress=None, missing=(404,)):
-        self.etags.append(etag)
-        body = self._answer(url)
-        if body is None:
-            return None
-        tag = f'"{hash(body)}"'
-        if etag == tag:
-            return net.Fetched("unchanged", b"", etag)
-        assert not known(body[: net.HEAD])
-        dest.write_bytes(body)
-        if progress:
-            progress(len(body), None)
-        return net.Fetched(
-            "new", body[: net.HEAD], tag if self.tagged else None, len(body), self._stamp(body)
-        )
 
 
 def answers(day: date = DAY, today: bytes | None = None, history: bytes | None = None, **overrides):
@@ -134,13 +77,13 @@ def answers(day: date = DAY, today: bytes | None = None, history: bytes | None =
 
 def watch(source: Source, tracker=None, now: datetime = NOW, always: bool = True) -> watching.Watch:
     kw = {} if tracker is None else {"tracker": tracker}
-    return mtgjson.watch(fetch=source.fetch_new, get=source.fetch, clock=lambda: now, always=always, **kw)
+    return mtgjson.watch(fetch=source.fetch_new, get=source.get, clock=lambda: now, always=always, **kw)
 
 
 def refill(source: Source, tracker=None):
     if tracker is None:
-        return mtgjson.snapshot(fetch=source.fetch, download=source.download)
-    return mtgjson.snapshot(fetch=source.fetch, download=source.download, tracker=tracker)
+        return mtgjson.snapshot(fetch=source.get, download=source.download)
+    return mtgjson.snapshot(fetch=source.get, download=source.download, tracker=tracker)
 
 
 def run(source: Source, tracker=None):
@@ -165,10 +108,9 @@ def have() -> set[date]:
 
 
 @pytest.fixture
-def data_dir(tmp_path, monkeypatch):
-    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path))
+def data_dir(data_dir, monkeypatch):
     monkeypatch.setattr(mtgjson, "FILES", mtgjson.FILES[:1])  # the catalogs' tests set them back
-    return tmp_path / "riffle"
+    return data_dir
 
 
 def test_the_first_run_keeps_the_build_and_the_90_days_before_it(data_dir, tracker):
@@ -825,7 +767,7 @@ def manifest(day: date, paths: list[str] | dict[str, int] | None = None, files: 
     if paths is None:
         paths = served_paths()
     sizes = paths if isinstance(paths, dict) else {path: 1000 + len(path) for path in paths}
-    if isinstance(files, _Auto):
+    if isinstance(files, Auto):
         files = {path: {"size_bytes": size} for path, size in sizes.items()}
     head = {
         "version": f"5.3.0+{day:%Y%m%d}",
@@ -863,10 +805,10 @@ def build(
 
 
 def serving(
-    path: str, body: bytes | None | Exception, digest: bytes | None | Exception | _Auto = AUTO
+    path: str, body: bytes | None | Exception, digest: bytes | None | Exception | Auto = AUTO
 ) -> dict:
     """MTGJSON's answers for a file and its .sha256: the body's own unless given."""
-    if isinstance(digest, _Auto):
+    if isinstance(digest, Auto):
         digest = sha(body) if isinstance(body, bytes) else None
     return {f"{B}/{path}": body, f"{B}/{path}.sha256": digest}
 

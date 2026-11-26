@@ -3,9 +3,7 @@ and the unit files on disk when it came, and a fake `loginctl` answers for linge
 
 import getpass
 import os
-import shutil
 import subprocess
-import sys
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -15,6 +13,8 @@ from riffle import times
 from riffle.ops import schedule as sched
 from riffle.ops.schedule import systemd
 from riffle.watch.watching import STORES
+from tests.conftest import invoke
+from tests.ops.conftest import never, on
 
 SYNC_TIMER = "gg.riffletcg.riffle-sync.timer"
 SYNC_SERVICE = "gg.riffletcg.riffle-sync.service"
@@ -22,21 +22,11 @@ LOGOUT = "jobs stop when you log out; to keep them: sudo loginctl enable-linger"
 RAN = {"ExecMainStatus": "0", "ExecMainExitTimestamp": "Mon 2026-09-28 07:01:20 MDT"}
 
 
-def never(*args, **_):
-    raise AssertionError(f"a real process asked for: {args}")
-
-
 @pytest.fixture(autouse=True)
 def linux(monkeypatch):
     """systemd is Linux's, so the schedule commands run as on a Linux machine with systemctl on
     PATH, wherever the tests do; and nothing here starts a real process."""
-    monkeypatch.setattr(sys, "platform", "linux")
-    which = shutil.which
-    monkeypatch.setattr(
-        shutil,
-        "which",
-        lambda cmd, *a, **k: "/usr/bin/systemctl" if cmd == "systemctl" else which(cmd, *a, **k),
-    )
+    on(monkeypatch, "linux", "/usr/bin/systemctl")
     monkeypatch.setattr(subprocess, "run", never)
 
 
@@ -335,28 +325,22 @@ def test_lingering_is_unknown_when_logind_gives_no_clear_answer(stdout, rc):
 # ---- the schedule commands on Linux -----------------------------------------------------
 
 
-def _cli(tmp_path, monkeypatch, fake, linger=True):
-    """`riffle` with the schedule's systemctl faked and logind's answer about lingering set;
-    returns each command's output."""
-    from typer.testing import CliRunner
+@pytest.fixture
+def cli(schedule_cli, monkeypatch):
+    """schedule_cli for systemctl, with logind's answer about lingering set."""
 
-    from riffle.cli import app
+    def faked(fake, linger=True):
+        monkeypatch.setattr(systemd, "lingering", lambda run=None: linger)
+        return schedule_cli(fake)
 
-    install, status, remove = sched.install, sched.status, sched.remove
-    monkeypatch.setattr(
-        sched, "install", lambda times, job=sched.SYNC: install(times, tmp_path / "riffle", fake, job=job)
-    )
-    monkeypatch.setattr(sched, "status", lambda job=sched.SYNC: status(fake, job=job))
-    monkeypatch.setattr(sched, "remove", lambda job=sched.SYNC: remove(fake, job=job))
-    monkeypatch.setattr(systemd, "lingering", lambda run=None: linger)
-    return lambda *args: CliRunner().invoke(app, list(args)).output
+    return faked
 
 
 def test_schedule_set_enables_the_sync_timer_and_shows_the_schedule_in_this_machine_s_time(
-    tmp_path, monkeypatch, denver
+    cli, monkeypatch, denver
 ):
     fake = FakeSystemctl(service=RAN)
-    run = _cli(tmp_path, monkeypatch, fake)
+    run = cli(fake)
     monkeypatch.setattr(times, "now", lambda: datetime(2026, 9, 28, 9, 41, tzinfo=UTC))  # 03:41 in Denver
     shown = run("schedule", "set", "07:00", "16:00")
     assert shown.startswith(f"systemd timer {SYNC_TIMER} enabled\n")
@@ -376,21 +360,21 @@ def test_schedule_set_enables_the_sync_timer_and_shows_the_schedule_in_this_mach
 
 
 @pytest.mark.parametrize("args", [["set", "07:00"], ["trickle"], ["watch"]], ids=lambda args: args[0])
-def test_the_jobs_are_installed_with_a_warning_when_they_would_stop_at_logout(tmp_path, monkeypatch, args):
+def test_the_jobs_are_installed_with_a_warning_when_they_would_stop_at_logout(cli, args):
     fake = FakeSystemctl()
-    shown = _cli(tmp_path, monkeypatch, fake, linger=False)("schedule", *args)
+    shown = cli(fake, linger=False)("schedule", *args)
     assert shown.count(f"{LOGOUT} {getpass.getuser()}\n") == 1
     assert fake.active and units()  # installed all the same
 
 
 @pytest.mark.parametrize("linger", [True, None], ids=["on", "unknown"])
-def test_nothing_is_said_of_lingering_when_it_s_on_or_can_t_be_told(tmp_path, monkeypatch, linger):
-    shown = _cli(tmp_path, monkeypatch, FakeSystemctl(), linger=linger)("schedule", "set", "07:00")
+def test_nothing_is_said_of_lingering_when_it_s_on_or_can_t_be_told(cli, linger):
+    shown = cli(FakeSystemctl(), linger=linger)("schedule", "set", "07:00")
     assert "log out" not in shown and shown.startswith(f"systemd timer {SYNC_TIMER} enabled\n")
 
 
-def test_schedule_remove_takes_the_sync_s_units_away(tmp_path, monkeypatch):
-    run = _cli(tmp_path, monkeypatch, FakeSystemctl())
+def test_schedule_remove_takes_the_sync_s_units_away(cli):
+    run = cli(FakeSystemctl())
     run("schedule", "set", "07:00")
     assert run("schedule", "remove") == "removed gg.riffletcg.riffle-sync\n"
     assert units() == []
@@ -398,8 +382,8 @@ def test_schedule_remove_takes_the_sync_s_units_away(tmp_path, monkeypatch):
     assert "no schedule — set one with: riffle schedule set 07:00" in run("schedule", "show")
 
 
-def test_the_schedule_commands_show_and_manage_the_trickle_job(tmp_path, monkeypatch):
-    run = _cli(tmp_path, monkeypatch, FakeSystemctl())
+def test_the_schedule_commands_show_and_manage_the_trickle_job(cli):
+    run = cli(FakeSystemctl())
     timer = systemd.unit_dir() / "gg.riffletcg.riffle-mtgo.timer"
     shown = run("schedule", "trickle")
     assert shown.startswith("systemd timer gg.riffletcg.riffle-mtgo.timer enabled\n")
@@ -418,13 +402,13 @@ def test_the_schedule_commands_show_and_manage_the_trickle_job(tmp_path, monkeyp
     assert run("schedule", "trickle", "--remove") == "no trickle job to remove\n"
 
 
-def test_the_schedule_commands_install_show_and_remove_a_watch_job_per_store(tmp_path, monkeypatch):
+def test_the_schedule_commands_install_show_and_remove_a_watch_job_per_store(cli):
     failed = {
         "ActiveState": "failed",
         "ExecMainStatus": "1",
         "ExecMainExitTimestamp": "Sat 2026-10-17 16:02:09 MDT",
     }
-    run = _cli(tmp_path, monkeypatch, FakeSystemctl(service=failed))
+    run = cli(FakeSystemctl(service=failed))
     labels = [f"gg.riffletcg.riffle-watch-{store}" for store in STORES]
     shown = run("schedule", "watch")
     assert shown.startswith("".join(f"systemd timer {label}.timer enabled\n" for label in labels))
@@ -442,13 +426,9 @@ def test_the_schedule_commands_install_show_and_remove_a_watch_job_per_store(tmp
     assert run("schedule", "watch", "--remove") == "".join(f"no {label} to remove\n" for label in labels)
 
 
-def test_a_timer_systemd_won_t_enable_is_an_error(tmp_path, monkeypatch, plain):
-    from typer.testing import CliRunner
-
-    from riffle.cli import app
-
-    _cli(tmp_path, monkeypatch, FakeSystemctl(fail="enable"))
-    result = CliRunner().invoke(app, ["schedule", "set", "07:00"])
+def test_a_timer_systemd_won_t_enable_is_an_error(cli, plain):
+    cli(FakeSystemctl(fail="enable"))
+    result = invoke("schedule", "set", "07:00")
     assert result.exit_code == 2, result.output
     said = plain(result.output)
     assert "wrote " in said and "but systemctl --user enable failed: Input/output error" in said
@@ -458,11 +438,11 @@ def no_bus(args):  # no user manager to talk to: systemctl --user exits 1
     return subprocess.CompletedProcess(args, 1, "", "Failed to connect to bus")
 
 
-def test_a_user_manager_that_can_t_be_asked_is_unknown_not_unloaded(tmp_path, monkeypatch):
+def test_a_user_manager_that_can_t_be_asked_is_unknown_not_unloaded(tmp_path, cli):
     systemd.install([(7, 0)], exe=tmp_path / "riffle", run=FakeSystemctl())
     with pytest.raises(OSError, match="systemctl --user show failed: Failed to connect to bus"):
         systemd.status(run=no_bus)
-    shown = _cli(tmp_path, monkeypatch, no_bus)("schedule", "show")
+    shown = cli(no_bus)("schedule", "show")
     assert (
         "gg.riffletcg.riffle-sync\n  loaded     unknown (systemctl --user show failed: Failed to connect"
         in shown
@@ -486,17 +466,13 @@ def test_a_dollar_in_an_argument_is_doubled_for_systemd():
     )
 
 
-def test_a_timer_systemd_won_t_disable_is_left_and_the_command_says_why(tmp_path, monkeypatch, plain):
-    from typer.testing import CliRunner
-
-    from riffle.cli import app
-
+def test_a_timer_systemd_won_t_disable_is_left_and_the_command_says_why(tmp_path, cli, plain):
     path = systemd.install([(7, 0)], exe=tmp_path / "riffle", run=FakeSystemctl())
     with pytest.raises(RuntimeError, match="systemctl --user disable failed: Input/output error"):
         systemd.remove(run=FakeSystemctl(fail="disable"))
     assert path.exists() and (path.parent / SYNC_SERVICE).exists()
-    _cli(tmp_path, monkeypatch, FakeSystemctl(fail="disable"))
-    result = CliRunner().invoke(app, ["schedule", "remove"])
+    cli(FakeSystemctl(fail="disable"))
+    result = invoke("schedule", "remove")
     assert result.exit_code == 2 and "systemctl --user disable failed" in plain(result.output)
     assert path.exists()
 

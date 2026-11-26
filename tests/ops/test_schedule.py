@@ -1,61 +1,22 @@
 """The launchd schedule, tested without launchd: a fake `launchctl` records calls."""
 
 import plistlib
-import subprocess
 import sys
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
 
 from riffle import times
 from riffle.ops import schedule as sched
+from tests.conftest import PRINT, FakeLaunchctl, invoke
+from tests.ops.conftest import POSTGRES, job_log, sync_run
 
 
 @pytest.fixture(autouse=True)
 def mac(monkeypatch):
     """launchd is macOS's, so the schedule commands run as on a Mac wherever the tests do."""
     monkeypatch.setattr(sys, "platform", "darwin")
-
-
-class FakeLaunchctl:
-    def __init__(self, loaded=False, bootstrap_rc=0, print_out=""):
-        self.calls = []
-        self.loaded = loaded
-        self.bootstrap_rc = bootstrap_rc
-        self.print_out = print_out
-
-    def __call__(self, args):
-        self.calls.append(args[1])
-        verb = args[1]
-        if verb == "bootout":
-            rc, self.loaded = (0 if self.loaded else 3), False
-            return subprocess.CompletedProcess(args, rc, "", "")
-        if verb == "bootstrap":
-            self.loaded = self.bootstrap_rc == 0
-            err = "Bootstrap failed: 5: Input/output error"
-            return subprocess.CompletedProcess(args, self.bootstrap_rc, "", err)
-        if verb == "print":
-            if self.loaded:
-                return subprocess.CompletedProcess(args, 0, self.print_out, "")
-            return subprocess.CompletedProcess(args, 113, "", "Could not find service")
-        raise AssertionError(f"unexpected launchctl {verb}")
-
-
-PRINT = """gui/501/gg.riffletcg.riffle-sync = {
-	active count = 0
-	path = /Users/pat/Library/LaunchAgents/gg.riffletcg.riffle-sync.plist
-	state = not running
-	program = /Users/pat/riffle/.venv/bin/riffle
-	runs = 3
-	last exit code = 0
-	event triggers = {
-		com.apple.launchd.calendarinterval = {
-			state = active
-		}
-	}
-}
-"""
 
 
 # ---- times ---------------------------------------------------------------------
@@ -153,17 +114,16 @@ def test_parse_print_takes_the_job_state_not_the_trigger_state():
 # ---- install / status / remove ------------------------------------------------
 
 
-def _env(tmp_path, monkeypatch):
-    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "data"))
+def _plist(tmp_path):
     return tmp_path / "LaunchAgents" / f"{sched.LABEL}.plist"
 
 
-def test_install_writes_loads_and_replaces(tmp_path, monkeypatch):
-    path = _env(tmp_path, monkeypatch)
+def test_install_writes_loads_and_replaces(tmp_path, data_dir):
+    path = _plist(tmp_path)
     lc = FakeLaunchctl(print_out=PRINT)
     sched.install([(7, 0)], exe=tmp_path / "riffle", run=lc, path=path)
     assert lc.calls == ["bootout", "bootstrap"] and lc.loaded
-    assert (tmp_path / "data" / "riffle").is_dir()  # log dir exists before launchd needs it
+    assert data_dir.is_dir()  # log dir exists before launchd needs it
 
     sched.install([(6, 0), (18, 0)], exe=tmp_path / "riffle", run=lc, path=path)  # set again = replace
     assert sched.read_times(path) == [(6, 0), (18, 0)]
@@ -174,24 +134,24 @@ def test_install_writes_loads_and_replaces(tmp_path, monkeypatch):
     assert (st.runs, st.last_exit) == ("3", "0")
 
 
-def test_install_reports_bootstrap_failure(tmp_path, monkeypatch):
-    path = _env(tmp_path, monkeypatch)
+def test_install_reports_bootstrap_failure(tmp_path):
+    path = _plist(tmp_path)
     with pytest.raises(RuntimeError, match="bootstrap failed"):
         sched.install([(7, 0)], exe=tmp_path / "riffle", run=FakeLaunchctl(bootstrap_rc=5), path=path)
     assert path.exists()  # written, just not loaded
 
 
-def test_status_when_written_but_never_loaded(tmp_path, monkeypatch):
+def test_status_when_written_but_never_loaded(tmp_path):
     """The exact v0.2.0 bug: a plist on disk that launchd never heard of."""
-    path = _env(tmp_path, monkeypatch)
+    path = _plist(tmp_path)
     path.parent.mkdir(parents=True)
     path.write_bytes(plistlib.dumps(sched.build([(7, 0)], tmp_path / "riffle", tmp_path / "log")))
     st = sched.status(run=FakeLaunchctl(loaded=False), path=path)
     assert st.installed and not st.loaded and st.runs is None
 
 
-def test_remove(tmp_path, monkeypatch):
-    path = _env(tmp_path, monkeypatch)
+def test_remove(tmp_path):
+    path = _plist(tmp_path)
     lc = FakeLaunchctl()
     sched.install([(7, 0)], exe=tmp_path / "riffle", run=lc, path=path)
     assert sched.remove(run=lc, path=path) is True
@@ -209,35 +169,18 @@ def test_the_trickle_job_runs_every_ten_minutes(tmp_path):
     assert "StartCalendarInterval" not in d
 
 
-def test_the_trickle_job_installs_and_goes_beside_the_sync_job(tmp_path, monkeypatch):
-    monkeypatch.setenv("HOME", str(tmp_path))
+def test_the_trickle_job_installs_and_goes_beside_the_sync_job(tmp_path):
     fake = FakeLaunchctl()
     path = sched.install([], exe=tmp_path / "riffle", run=fake, job=sched.TRICKLE)
-    assert path == tmp_path / "Library" / "LaunchAgents" / "gg.riffletcg.riffle-mtgo.plist"
+    assert path == Path.home() / "Library" / "LaunchAgents" / "gg.riffletcg.riffle-mtgo.plist"
     assert plistlib.loads(path.read_bytes())["StartInterval"] == 600
     assert sched.log_path(sched.TRICKLE).name == "mtgo-trickle.log"
     assert sched.status(run=fake, job=sched.TRICKLE).loaded
     assert sched.remove(run=fake, job=sched.TRICKLE) and not path.exists()
 
 
-def _cli(tmp_path, monkeypatch, fake):
-    """`riffle` with the schedule's launchctl faked; returns each command's output."""
-    from typer.testing import CliRunner
-
-    from riffle.cli import app
-
-    monkeypatch.setenv("HOME", str(tmp_path))
-    install, status, remove = sched.install, sched.status, sched.remove
-    monkeypatch.setattr(
-        sched, "install", lambda times, job: install(times, tmp_path / "riffle", fake, job=job)
-    )
-    monkeypatch.setattr(sched, "status", lambda job=sched.SYNC: status(fake, job=job))
-    monkeypatch.setattr(sched, "remove", lambda job=sched.SYNC: remove(fake, job=job))
-    return lambda *args: CliRunner().invoke(app, list(args)).output
-
-
-def test_the_schedule_commands_show_and_manage_the_trickle_job(tmp_path, monkeypatch):
-    run = _cli(tmp_path, monkeypatch, FakeLaunchctl(print_out=PRINT))
+def test_the_schedule_commands_show_and_manage_the_trickle_job(launchd_cli):
+    run = launchd_cli(FakeLaunchctl(print_out=PRINT))
     shown = run("schedule", "trickle")
     assert "every      10 minutes: riffle mtgo trickle" in shown and "loaded     yes" in shown
     both = run("schedule")
@@ -249,21 +192,17 @@ def test_the_schedule_commands_show_and_manage_the_trickle_job(tmp_path, monkeyp
     assert run("schedule", "trickle", "--remove") == "no trickle job to remove\n"
 
 
-def test_the_sync_job_shows_its_times_and_next_run_with_the_mac_s_zone(tmp_path, monkeypatch, denver):
-    from datetime import UTC
+def sync_show(launchd_cli, fake):
+    """The sync job installed at 07:00 and 16:00 with launchctl faked; `riffle schedule show`'s output."""
+    run = launchd_cli(fake)
+    sched.install([(7, 0), (16, 0)])
+    return lambda: run("schedule", "show")
 
-    from typer.testing import CliRunner
 
-    from riffle import times
-    from riffle.cli import app
-
-    monkeypatch.setenv("HOME", str(tmp_path))
-    fake = FakeLaunchctl(print_out=PRINT)
-    sched.install([(7, 0), (16, 0)], exe=tmp_path / "riffle", run=fake)
-    status = sched.status
-    monkeypatch.setattr(sched, "status", lambda job=sched.SYNC: status(fake, job=job))
+def test_the_sync_job_shows_its_times_and_next_run_with_the_mac_s_zone(launchd_cli, monkeypatch, denver):
+    show = sync_show(launchd_cli, FakeLaunchctl(print_out=PRINT))
     monkeypatch.setattr(times, "now", lambda: datetime(2026, 9, 28, 9, 41, tzinfo=UTC))  # 03:41 in Denver
-    shown = CliRunner().invoke(app, ["schedule", "show"]).output
+    shown = show()
     assert "  times      07:00, 16:00  (24-hour, daily, the Mac's time: MDT)" in shown
     assert "  next run   Mon 2026-09-28 07:00 MDT" in shown
 
@@ -279,14 +218,14 @@ def test_a_store_s_watch_job_runs_every_five_minutes(tmp_path):
     assert sched.log_path(job).name == "watch-manapool.log"
 
 
-def test_the_schedule_commands_install_show_and_remove_a_watch_job_per_store(tmp_path, monkeypatch):
-    run = _cli(tmp_path, monkeypatch, FakeLaunchctl(print_out=PRINT))
+def test_the_schedule_commands_install_show_and_remove_a_watch_job_per_store(launchd_cli):
+    run = launchd_cli(FakeLaunchctl(print_out=PRINT))
     stores = ["cardkingdom", "manapool", "cardmarket", "tcgcsv", "mtgjson", "goatbots", "scryfall"]
     labels = [f"gg.riffletcg.riffle-watch-{store}" for store in stores]
     shown = run("schedule", "watch")
     assert [shown.index(label) for label in labels] == sorted(shown.index(label) for label in labels)
     assert "every      5 minutes: riffle watch tcgcsv" in shown and "loaded     yes" in shown
-    agents = tmp_path / "Library" / "LaunchAgents"
+    agents = Path.home() / "Library" / "LaunchAgents"
     assert sorted(p.name for p in agents.iterdir()) == sorted(f"{label}.plist" for label in labels)
     every = run("schedule")
     assert (
@@ -301,18 +240,14 @@ def test_the_schedule_commands_install_show_and_remove_a_watch_job_per_store(tmp
     assert run("schedule", "watch", "--remove") == "".join(f"no {label} to remove\n" for label in labels)
 
 
-def test_a_watch_job_launchd_won_t_load_is_an_error(tmp_path, monkeypatch, plain):
-    run = _cli(tmp_path, monkeypatch, FakeLaunchctl(bootstrap_rc=5))
+def test_a_watch_job_launchd_won_t_load_is_an_error(launchd_cli, plain):
+    run = launchd_cli(FakeLaunchctl(bootstrap_rc=5))
     said = "but launchctl bootstrap failed: Bootstrap failed: 5: Input/output error"
     assert said in plain(run("schedule", "watch"))
 
 
 # ---- what each job's log says -------------------------------------------------------------
 
-POSTGRES = (
-    "can't reach Postgres at postgresql+psycopg://tcg@localhost:5432/tcg: connection refused"
-    " — start it with: riffle db up"
-)
 WATCH_RUN = "2026-10-17 22:02:03 UTC  riffle watch manapool\n22:14:10  exited 1 after 12m 07s\n"
 MANAPOOL_FAILED = (
     "2026-10-18 02:08:10 UTC  riffle watch manapool\n"
@@ -327,29 +262,8 @@ MANAPOOL_FAILED = (
 )
 
 
-def job_log(job: sched.Job, text: str) -> Path:
-    path = sched.log_path(job)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(text)
-    return path
-
-
-def sync_run(k: int, code: int | None = 1) -> str:
-    """Run k of the sync's twice-daily runs from 2026-10-13 13:02:03 UTC, as its log has it: the
-    header, the Postgres error unless it exited 0, and the closing line unless code is None."""
-    started = datetime(2026, 10, 13, 13, 2, 3, tzinfo=UTC) + timedelta(days=k // 2, hours=9 * (k % 2))
-    lines = [f"{started:%Y-%m-%d %H:%M:%S} UTC  riffle sync"]
-    if code != 0:
-        lines.append(POSTGRES)
-    if code is not None:
-        lines.append(f"{started + timedelta(seconds=1):%H:%M:%S}  exited {code} after 1.2s")
-    return "".join(f"{line}\n" for line in lines)
-
-
-def test_schedule_show_says_how_each_job_s_newest_run_ended_and_when_the_next_is_due(
-    tmp_path, monkeypatch, denver
-):
-    run = _cli(tmp_path, monkeypatch, FakeLaunchctl(print_out=PRINT))
+def test_schedule_show_says_how_each_job_s_newest_run_ended_and_when_the_next_is_due(launchd_cli, denver):
+    run = launchd_cli(FakeLaunchctl(print_out=PRINT))
     run("schedule", "watch")
     job_log(sched.watch_job("manapool"), WATCH_RUN)
     job_log(sched.watch_job("tcgcsv"), "2026-10-17 22:02:03 UTC  riffle watch tcgcsv\n")  # killed, or running
@@ -364,21 +278,8 @@ def test_schedule_show_says_how_each_job_s_newest_run_ended_and_when_the_next_is
     assert "  last run   none in the log\n  loaded     yes\n" in shown  # no run yet: no next run either
 
 
-def sync_show(tmp_path, monkeypatch, fake):
-    """The sync job installed at 07:00 and 16:00 with launchctl faked; `riffle schedule show`'s output."""
-    from typer.testing import CliRunner
-
-    from riffle.cli import app
-
-    monkeypatch.setenv("HOME", str(tmp_path))
-    sched.install([(7, 0), (16, 0)], exe=tmp_path / "riffle", run=fake)
-    status = sched.status
-    monkeypatch.setattr(sched, "status", lambda job=sched.SYNC: status(fake, job=job))
-    return lambda: CliRunner().invoke(app, ["schedule", "show"]).output
-
-
-def test_schedule_show_names_the_sync_failing_run_after_run_until_a_run_passes(tmp_path, monkeypatch, denver):
-    show = sync_show(tmp_path, monkeypatch, FakeLaunchctl(print_out=PRINT))
+def test_schedule_show_names_the_sync_failing_run_after_run_until_a_run_passes(launchd_cli, denver):
+    show = sync_show(launchd_cli, FakeLaunchctl(print_out=PRINT))
     job_log(sched.SYNC, "".join(sync_run(k) for k in range(10)))
     shown = show()
     assert "  last run   Sat 2026-10-17 16:02 MDT: exited 1 after 1.2s\n" in shown
@@ -389,8 +290,8 @@ def test_schedule_show_names_the_sync_failing_run_after_run_until_a_run_passes(t
     assert "failing" not in show()
 
 
-def test_schedule_show_counts_each_job_s_steps_failed_in_the_last_24_hours(tmp_path, monkeypatch, denver):
-    run = _cli(tmp_path, monkeypatch, FakeLaunchctl(print_out=PRINT))
+def test_schedule_show_counts_each_job_s_steps_failed_in_the_last_24_hours(launchd_cli, monkeypatch, denver):
+    run = launchd_cli(FakeLaunchctl(print_out=PRINT))
     monkeypatch.setattr(times, "now", lambda: datetime(2026, 10, 19, 8, 30, tzinfo=UTC))
     run("schedule", "watch")
     job_log(sched.watch_job("manapool"), MANAPOOL_FAILED)
@@ -410,16 +311,10 @@ def test_schedule_show_counts_each_job_s_steps_failed_in_the_last_24_hours(tmp_p
     )
 
 
-def test_schedule_show_says_when_a_job_s_log_can_t_be_read_and_still_exits_0(
-    tmp_path, monkeypatch, unreadable
-):
-    from typer.testing import CliRunner
-
-    from riffle.cli import app
-
-    _cli(tmp_path, monkeypatch, FakeLaunchctl(print_out=PRINT))("schedule", "watch")
+def test_schedule_show_says_when_a_job_s_log_can_t_be_read_and_still_exits_0(launchd_cli, unreadable):
+    launchd_cli(FakeLaunchctl(print_out=PRINT))("schedule", "watch")
     path = unreadable(job_log(sched.watch_job("manapool"), WATCH_RUN))
-    result = CliRunner().invoke(app, ["schedule", "show"])
+    result = invoke("schedule", "show")
     assert result.exit_code == 0, result.output
     assert (
         f"  log        {path}: unreadable (Permission denied); failures in the last 24 h unknown\n"
@@ -428,10 +323,10 @@ def test_schedule_show_says_when_a_job_s_log_can_t_be_read_and_still_exits_0(
     assert f"  log        {path}\n" not in result.output
 
 
-def test_schedule_show_says_what_the_log_says_of_a_job_launchd_hasn_t_loaded(tmp_path, monkeypatch, denver):
+def test_schedule_show_says_what_the_log_says_of_a_job_launchd_hasn_t_loaded(launchd_cli, denver):
     fake = FakeLaunchctl(print_out=PRINT)
-    show = sync_show(tmp_path, monkeypatch, fake)
-    sched.install([], exe=tmp_path / "riffle", run=fake, job=sched.watch_job("manapool"))
+    show = sync_show(launchd_cli, fake)
+    sched.install([], job=sched.watch_job("manapool"))
     job_log(sched.SYNC, sync_run(0) + sync_run(1))
     job_log(sched.watch_job("manapool"), WATCH_RUN)
     fake.loaded = False

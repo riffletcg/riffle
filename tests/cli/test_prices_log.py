@@ -6,13 +6,12 @@ import json
 from datetime import date
 
 import pytest
-from typer.testing import CliRunner
 
 from riffle.analysis import pricing
-from riffle.cli import app
 from riffle.export import obsidian
 from riffle.ingest.remote import scryfall
 from riffle.models import PricedPrinting, Prices
+from tests.conftest import invoke
 
 
 def keep_day(day: str, prices: dict[str, dict]) -> None:
@@ -29,7 +28,7 @@ def sid(n: int) -> str:
 
 
 def run(*args):
-    return CliRunner().invoke(app, ["prices", "log", *args])
+    return invoke("prices", "log", *args)
 
 
 def test_kept_days_are_listed_oldest_first_and_other_files_ignored():
@@ -97,9 +96,8 @@ def test_a_card_s_history_a_line_a_day(opened):
     assert obsidian.price_line("2026-09-24", "X", Prices(1234.5, 0.1)) == "2026-09-24 | X | $1,234.50 | 0.10"
 
 
-def test_with_no_names_every_buy_line_s_card(tmp_path, monkeypatch, opened):
-    monkeypatch.setenv("HOME", str(tmp_path))  # the default vault lives under it
-    notes = tmp_path / "vault" / "games" / "tcg"
+def test_with_no_names_every_buy_line_s_card(mtg, opened):
+    notes = mtg.parent
     (notes / "mtg" / "_generated").mkdir(parents=True)
     (notes / "shopping.md").write_text(
         "- [ ] [[Sol Ring]] #mtg/buy\n- [ ] [[Not A Card]] #mtg/buy\n"

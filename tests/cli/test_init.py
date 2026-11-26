@@ -7,11 +7,10 @@ import tomllib
 from pathlib import Path
 
 import pytest
-from typer.testing import CliRunner
 
 import riffle.cli._common as cli_common
 from riffle import config
-from riffle.cli import app
+from tests.conftest import Terminal, invoke
 
 QUESTION = "Where is your Obsidian vault?"
 EXISTING = (
@@ -26,12 +25,9 @@ EXISTING = (
 
 
 @pytest.fixture
-def home(tmp_path, monkeypatch) -> Path:
+def home(bare_home) -> Path:
     """A scratch HOME with no config yet; returns where the config goes."""
-    monkeypatch.setenv("HOME", str(tmp_path))
-    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / ".config"))
-    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / ".local" / "share"))
-    return tmp_path / ".config" / "riffle" / "config.toml"
+    return config.config_path()
 
 
 @pytest.fixture
@@ -43,7 +39,7 @@ def folder(tmp_path) -> Path:
 
 
 def init(*args: str, **kw):
-    return CliRunner().invoke(app, ["init", *args], **kw)
+    return invoke("init", *args, **kw)
 
 
 def vault_in(path: Path) -> Path | None:
@@ -193,13 +189,8 @@ def test_a_home_no_one_has_here_is_refused(home, plain):
     assert "no folder at ~nosuchuser-riffle/notes" in plain(result.output)
 
 
-class _Terminal(io.StringIO):
-    def isatty(self) -> bool:
-        return True
-
-
 def test_interactive_means_stdin_is_a_terminal(monkeypatch):
-    monkeypatch.setattr(sys, "stdin", _Terminal())
+    monkeypatch.setattr(sys, "stdin", Terminal())
     assert cli_common._interactive() is True
     monkeypatch.setattr(sys, "stdin", io.StringIO())
     assert cli_common._interactive() is False

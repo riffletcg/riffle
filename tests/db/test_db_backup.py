@@ -22,20 +22,23 @@ from types import SimpleNamespace
 import pytest
 from sqlalchemy import create_engine, insert, make_url, text
 from sqlalchemy.exc import OperationalError
-from typer.testing import CliRunner
 
 import riffle.cli._common as cli_common
 import riffle.cli.sync as cli_sync
 from riffle import config, db, runs, times
-from riffle.cli import app
 from riffle.db import backup, compose, migrate
 from riffle.db.models import Card, ExternalId, Format, Legality, MtgCard, MtgPrinting, Printing, Set
-from riffle.ingest.remote import scryfall
 from riffle.ops import status
-from tests.cli.test_sync_failures import NOTE, ONLINE, before_closing, network, online_steps
-from tests.conftest import PG_TEST_URL, docker_env
-from tests.db.test_db_setup import NO_DOCKER
-from tests.ops.test_status import quiet
+from tests.conftest import (
+    NO_DOCKER,
+    ONLINE,
+    PG_TEST_URL,
+    before_closing,
+    docker_env,
+    invoke,
+    network,
+    online_steps,
+)
 
 AT = datetime(2026, 10, 23, 22, 15, 3, tzinfo=UTC)
 NAME = "tcg-2026-10-23T221503Z.dump"  # tcg's dump made at AT
@@ -604,7 +607,7 @@ def _args(command: str, dump: Path) -> list[str]:
 def test_db_backup_says_the_dump_its_size_that_it_read_back_whole_and_how_many_are_kept(backed_up):
     path = backup.folder() / NAME
     backed_up.answer = backup.Dump(path, 41_200_000, 14)
-    result = CliRunner().invoke(app, ["db", "backup"])
+    result = invoke("db", "backup")
     assert result.exit_code == 0, result.output
     assert config.tilde(path).startswith("~/")
     assert f"database backup: {config.tilde(path)}, 41.2 MB, read back whole; 14 kept" in result.output
@@ -624,7 +627,7 @@ def test_db_backup_says_the_dump_its_size_that_it_read_back_whole_and_how_many_a
 )
 def test_db_backup_fails_its_step_and_exits_1_when_the_dump_can_t_be_made(backed_up, error, said):
     backed_up.answer = error
-    result = CliRunner().invoke(app, ["db", "backup"])
+    result = invoke("db", "backup")
     assert result.exit_code == 1, result.output
     assert f"! database backup: not backed up: {said}" in result.output
     assert before_closing(result.output) == "1 step failed: database backup"
@@ -636,7 +639,7 @@ def test_db_backup_fails_its_step_and_exits_1_when_the_dump_can_t_be_made(backed
 )
 def test_db_backup_and_restore_say_how_to_start_an_unreachable_server(dump, monkeypatch, command, step, done):
     monkeypatch.setattr(compose, "in_db", lambda *args, **kwargs: PREFIX)
-    result = CliRunner().invoke(app, _args(command, dump))
+    result = invoke(*_args(command, dump))
     assert result.exit_code == 1, result.output
     assert re.search(rf"! {step}: {UNREACHABLE_SAID.format(done=done)}", result.output), result.output
     assert before_closing(result.output) == f"1 step failed: {step}"
@@ -648,14 +651,14 @@ def test_db_backup_and_restore_say_how_to_start_an_unreachable_server(dump, monk
 )
 def test_db_backup_and_restore_name_the_config_when_database_url_can_t_be_used(dump, command, step, done):
     config.config_path().write_text('database_url = "not a url"\n', encoding="utf-8")
-    result = CliRunner().invoke(app, _args(command, dump))
+    result = invoke(*_args(command, dump))
     assert result.exit_code == 1, result.output
     assert f"! {step}: not {done}: database_url in {config.config_path()} can't be used: " in result.output
     assert before_closing(result.output) == f"1 step failed: {step}"
 
 
 def test_db_restore_needs_a_dump_that_exists(tmp_path, restored, plain):
-    result = CliRunner().invoke(app, ["db", "restore", str(tmp_path / "none.dump"), "--yes"])
+    result = invoke("db", "restore", str(tmp_path / "none.dump"), "--yes")
     assert result.exit_code == 2
     assert "does not exist" in plain(result.output) and restored.calls == []
 
@@ -664,7 +667,7 @@ def test_db_restore_without_yes_and_no_terminal_says_how_to_be_asked_and_runs_no
     dump, restored, monkeypatch
 ):
     monkeypatch.setattr(cli_common, "_interactive", lambda: False)
-    result = CliRunner().invoke(app, ["db", "restore", str(dump)])
+    result = invoke("db", "restore", str(dump))
     assert result.exit_code == 2, result.output
     said = "riffle db restore replaces the database: run it at a terminal to be asked first, or add --yes"
     assert said in result.stderr and "database restore" not in result.output
@@ -682,7 +685,7 @@ def test_db_restore_at_a_terminal_asks_first_and_no_runs_nothing(
     path = tmp_path / name
     path.write_bytes(DUMP)
     monkeypatch.setattr(cli_common, "_interactive", lambda: True)
-    result = CliRunner().invoke(app, ["db", "restore", str(path)], input=answer)
+    result = invoke("db", "restore", str(path), input=answer)
     assert result.exit_code == 1, result.output
     assert f"Replace everything in {UNREACHABLE} with {name}{made}? [y/N]: " in result.output
     assert "Aborted" in result.output and restored.calls == []
@@ -691,7 +694,7 @@ def test_db_restore_at_a_terminal_asks_first_and_no_runs_nothing(
 def test_db_restore_at_a_terminal_answering_yes_goes_on(dump, restored, monkeypatch):
     monkeypatch.setattr(cli_common, "_interactive", lambda: True)
     monkeypatch.setattr(migrate, "current", lambda engine: migrate.head())
-    result = CliRunner().invoke(app, ["db", "restore", str(dump)], input="y\n")
+    result = invoke("db", "restore", str(dump), input="y\n")
     assert result.exit_code == 0, result.output
     assert restored.calls == [(UNREACHABLE, dump)]
 
@@ -699,7 +702,7 @@ def test_db_restore_at_a_terminal_answering_yes_goes_on(dump, restored, monkeypa
 def test_db_restore_asks_about_a_database_url_it_can_t_read_without_showing_it(dump, restored, monkeypatch):
     config.config_path().write_text('database_url = "not a url"\n', encoding="utf-8")
     monkeypatch.setattr(cli_common, "_interactive", lambda: True)
-    result = CliRunner().invoke(app, ["db", "restore", str(dump)], input="n\n")
+    result = invoke("db", "restore", str(dump), input="n\n")
     assert result.exit_code == 1, result.output
     asked = f"Replace everything in the database database_url names with {NAME} (made 2026-10-23 22:15 UTC)?"
     assert asked in result.output and "Aborted" in result.output and restored.calls == []
@@ -711,7 +714,7 @@ def test_db_restore_with_yes_restores_and_says_the_schema_the_dump_carried(
 ):
     head = migrate.head()
     monkeypatch.setattr(migrate, "current", lambda engine: "0001" if older else head)
-    result = CliRunner().invoke(app, ["db", "restore", str(dump), "--yes"])
+    result = invoke("db", "restore", str(dump), "--yes")
     assert result.exit_code == 0, result.output
     assert "Replace everything" not in result.output
     done = f"database restore: {NAME} into {UNREACHABLE}"
@@ -739,7 +742,7 @@ def test_db_restore_with_yes_restores_and_says_the_schema_the_dump_carried(
 )
 def test_db_restore_fails_its_step_and_exits_1_when_the_restore_can_t_be_made(dump, restored, error, said):
     restored.answer = error
-    result = CliRunner().invoke(app, ["db", "restore", str(dump), "--yes"])
+    result = invoke("db", "restore", str(dump), "--yes")
     assert result.exit_code == 1, result.output
     assert f"! database restore: not restored: {said}" in result.output
     assert before_closing(result.output) == "1 step failed: database restore"
@@ -748,7 +751,7 @@ def test_db_restore_fails_its_step_and_exits_1_when_the_restore_can_t_be_made(du
 def test_db_backup_warns_and_exits_0_when_older_dumps_can_t_be_removed(backed_up):
     path = backup.folder() / NAME
     backed_up.answer = backup.Dump(path, 41_200_000, 15, "[Errno 13] Permission denied")
-    result = CliRunner().invoke(app, ["db", "backup"])
+    result = invoke("db", "backup")
     assert result.exit_code == 0, result.output
     said = (
         f"{config.tilde(path)}, 41.2 MB, read back whole; 15 kept;"
@@ -762,7 +765,7 @@ def test_db_restore_says_the_schema_is_unknown_when_the_server_goes_away_after(d
         raise OperationalError("SELECT", {}, Exception("server closed the connection unexpectedly"))
 
     monkeypatch.setattr(migrate, "current", gone)
-    result = CliRunner().invoke(app, ["db", "restore", str(dump), "--yes"])
+    result = invoke("db", "restore", str(dump), "--yes")
     assert result.exit_code == 0, result.output
     unknown = f"schema     unknown: can't reach Postgres at {UNREACHABLE}: server closed the connection"
     assert unknown in result.output
@@ -771,19 +774,8 @@ def test_db_restore_says_the_schema_is_unknown_when_the_server_goes_away_after(d
 # ---- the sync's last step ---------------------------------------------------------------------
 
 
-@pytest.fixture
-def deck(opened, monkeypatch) -> Path:
-    """One deck note in the vault every test's config names, the catalog in memory and a price day
-    kept, so a sync has its vault half to do; returns the deck notes' mtg/."""
-    mtg = Path.home() / "vault" / "games" / "tcg" / "mtg"
-    (mtg / "modern").mkdir(parents=True)
-    (mtg / "modern" / "burn.md").write_text(NOTE)
-    monkeypatch.setattr(scryfall, "snapshot_prices", lambda: (Path("/d/2026-09-26.jsonl.gz"), False))
-    return mtg
-
-
 def test_a_sync_ends_with_the_database_backup_step_after_everything_else_it_does(
-    deck, backed_up, monkeypatch
+    one_deck, backed_up, monkeypatch
 ):
     network(monkeypatch, up_after=0)
     calls: list[str] = []
@@ -791,18 +783,18 @@ def test_a_sync_ends_with_the_database_backup_step_after_everything_else_it_does
     backed_up.sequence = calls
     path = backup.folder() / NAME
     backed_up.answer = backup.Dump(path, 41_200_000, 14)
-    result = CliRunner().invoke(app, ["sync"])
+    result = invoke("sync")
     assert result.exit_code == 0, result.output
     assert calls == [*ONLINE, "backup"]
     said = f"database backup: {config.tilde(path)}, 41.2 MB, read back whole; 14 kept"
     assert said in result.output and result.output.index("decks ·") < result.output.index(said)
-    assert (deck / "_generated" / "burn-data.md").exists()
+    assert (one_deck / "_generated" / "burn-data.md").exists()
     [(url, where, _v)] = backed_up.calls
     assert (url, where) == (UNREACHABLE, backup.folder()) and backed_up.held == ["riffle sync"]
 
 
-def test_an_offline_sync_and_a_resync_make_no_backup(deck, backed_up):
-    result = CliRunner().invoke(app, ["sync", "--offline"])
+def test_an_offline_sync_and_a_resync_make_no_backup(one_deck, backed_up):
+    result = invoke("sync", "--offline")
     assert result.exit_code == 0, result.output
     assert "database backup" not in result.output and backed_up.calls == []
     cli_sync._resync()
@@ -810,12 +802,12 @@ def test_an_offline_sync_and_a_resync_make_no_backup(deck, backed_up):
 
 
 def test_a_database_this_machine_doesn_t_run_is_a_warning_in_the_sync_not_a_failure(
-    deck, backed_up, monkeypatch
+    one_deck, backed_up, monkeypatch
 ):
     network(monkeypatch, up_after=0)
     online_steps(monkeypatch, [])
     backed_up.answer = backup.NotHere(ELSEWHERE)
-    result = CliRunner().invoke(app, ["sync"])
+    result = invoke("sync")
     assert result.exit_code == 0, result.output
     assert f"warning: database backup: not backed up: {ELSEWHERE}" in result.output
     assert "step failed" not in result.output
@@ -830,26 +822,27 @@ def test_a_database_this_machine_doesn_t_run_is_a_warning_in_the_sync_not_a_fail
     ids=["Failed", "OSError"],
 )
 def test_any_other_backup_failure_fails_the_sync_s_step_after_its_other_work(
-    deck, backed_up, monkeypatch, error, said
+    one_deck, backed_up, monkeypatch, error, said
 ):
     network(monkeypatch, up_after=0)
     calls: list[str] = []
     online_steps(monkeypatch, calls)
     backed_up.sequence = calls
     backed_up.answer = error
-    result = CliRunner().invoke(app, ["sync"])
+    result = invoke("sync")
     assert result.exit_code == 1, result.output
     assert calls == [*ONLINE, "backup"]
     assert f"! database backup: not backed up: {said}" in result.output
-    assert "1 decks · 2 notes updated" in result.output and (deck / "_generated" / "burn-data.md").exists()
+    assert "1 decks · 2 notes updated" in result.output
+    assert (one_deck / "_generated" / "burn-data.md").exists()
     assert before_closing(result.output) == "1 step failed: database backup"
 
 
-def test_an_unreachable_database_fails_the_sync_s_backup_step(deck, monkeypatch):
+def test_an_unreachable_database_fails_the_sync_s_backup_step(one_deck, monkeypatch):
     monkeypatch.setattr(compose, "in_db", lambda *args, **kwargs: PREFIX)
     network(monkeypatch, up_after=0)
     online_steps(monkeypatch, [])
-    result = CliRunner().invoke(app, ["sync"])
+    result = invoke("sync")
     assert result.exit_code == 1, result.output
     assert re.search(rf"! database backup: {UNREACHABLE_SAID.format(done='backed up')}", result.output)
     assert before_closing(result.output) == "1 step failed: database backup"
@@ -885,9 +878,9 @@ def test_the_db_backup_line_says_none_yet_and_what_makes_one(there):
     assert status.db_backup_line(folder) == "none yet: riffle db backup makes one, and each sync after it"
 
 
-def test_riffle_status_shows_the_db_backup_line_under_its_label_after_backup(monkeypatch):
-    quiet(monkeypatch)
-    result = CliRunner().invoke(app, ["status", "--days", "3"])
+def test_riffle_status_shows_the_db_backup_line_under_its_label_after_backup(quiet):
+    quiet(datetime(2026, 10, 3, 8, 30, tzinfo=UTC))
+    result = invoke("status", "--days", "3")
     assert result.exit_code == 0, result.output
     lines = result.output.splitlines()
     assert lines[-2] == "backup        Time Machine to Backup Disk"

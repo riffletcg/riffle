@@ -4,46 +4,21 @@ what the schedule commands write; where there's none they refuse before writing 
 
 import os
 import re
-import shutil
 import subprocess
-import sys
 from pathlib import Path
 
 import pytest
-from typer.testing import CliRunner
 
-from riffle.cli import app
 from riffle.ops import schedule as sched
 from riffle.ops import status
+from tests.conftest import invoke
+from tests.ops.conftest import every_schedule_command, never, on
 
 NEEDS_SYSTEMD = "scheduling needs systemd on Linux"
 ELSEWHERE = "scheduling runs on macOS (launchd) and Linux (systemd)"
 NONE = [("linux", None, NEEDS_SYSTEMD), ("freebsd14", "/usr/local/bin/systemctl", ELSEWHERE)]
 NONE_IDS = ["Linux without systemctl", "another system"]
-SCHEDULE = [
-    [],
-    ["show"],
-    ["set", "07:00"],
-    ["remove"],
-    ["trickle"],
-    ["trickle", "--remove"],
-    ["watch"],
-    ["watch", "--remove"],
-]
 README = Path(__file__).resolve().parents[2] / "README.md"
-
-
-def on(monkeypatch, platform: str, systemctl: str | None) -> None:
-    """The tests' machine as `platform`, with systemctl on PATH at `systemctl` or not at all."""
-    monkeypatch.setattr(sys, "platform", platform)
-    which = shutil.which
-    monkeypatch.setattr(
-        shutil, "which", lambda cmd, *a, **k: systemctl if cmd == "systemctl" else which(cmd, *a, **k)
-    )
-
-
-def never(*args, **_):
-    raise AssertionError(f"a scheduler asked: {args}")
 
 
 def unit_dir() -> Path:
@@ -118,7 +93,7 @@ def test_on_a_mac_the_schedule_is_launchd_s_even_with_systemctl_on_path(tmp_path
 
 
 @pytest.mark.parametrize(("platform", "systemctl", "said"), NONE, ids=NONE_IDS)
-@pytest.mark.parametrize("args", SCHEDULE, ids=lambda args: " ".join(args) or "bare")
+@every_schedule_command
 def test_schedule_commands_refuse_where_there_s_no_scheduler_before_writing_anything(
     monkeypatch, plain, platform, systemctl, said, args
 ):
@@ -126,7 +101,7 @@ def test_schedule_commands_refuse_where_there_s_no_scheduler_before_writing_anyt
     for name in ("install", "status", "remove"):
         monkeypatch.setattr(sched, name, never)
     monkeypatch.setattr(subprocess, "run", never)
-    result = CliRunner().invoke(app, ["schedule", *args])
+    result = invoke("schedule", *args)
     assert result.exit_code == 2, result.output
     assert said in plain(result.output), result.output
     assert not (Path.home() / "Library").exists() and not unit_dir().exists()
@@ -138,7 +113,7 @@ def test_the_scheduler_is_checked_before_a_subcommand_s_arguments(
     monkeypatch, plain, platform, systemctl, said, args
 ):
     on(monkeypatch, platform, systemctl)
-    result = CliRunner().invoke(app, ["schedule", *args])
+    result = invoke("schedule", *args)
     assert result.exit_code == 2, result.output
     assert said in plain(result.output)
 
@@ -147,7 +122,7 @@ def test_status_s_jobs_line_asks_systemd_on_linux(monkeypatch):
     on(monkeypatch, "linux", "/usr/bin/systemctl")
     monkeypatch.setattr(sched, "status", lambda job=sched.SYNC: sched.Status(True, True, last_exit="0"))
     monkeypatch.setattr(status, "backup_line", lambda *_, **__: "none")
-    result = CliRunner().invoke(app, ["status", "--days", "3"])
+    result = invoke("status", "--days", "3")
     assert result.exit_code == 0, result.output
     assert re.search(r"^jobs\s+9 of 9 loaded; every last run exited 0$", result.output, re.M), result.output
 
@@ -157,7 +132,7 @@ def test_status_says_there_is_no_scheduler_where_there_s_neither(monkeypatch, pl
     on(monkeypatch, platform, systemctl)
     monkeypatch.setattr(sched, "status", never)
     monkeypatch.setattr(status, "backup_line", lambda *_, **__: "none")
-    result = CliRunner().invoke(app, ["status", "--days", "3"])
+    result = invoke("status", "--days", "3")
     assert result.exit_code == 0, result.output
     assert re.search(r"^jobs\s+no scheduler on this platform yet$", result.output, re.M), result.output
 

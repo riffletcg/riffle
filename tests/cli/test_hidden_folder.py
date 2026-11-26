@@ -5,13 +5,11 @@ import shutil
 from pathlib import Path
 
 import pytest
-from typer.testing import CliRunner
 
 from riffle import config, sync, vault
-from riffle.cli import app
 from riffle.cli.sync import _some
 from riffle.export import obsidian
-from riffle.ingest.remote import scryfall
+from tests.conftest import invoke
 
 IN_VIEW = ("Aesi, Tyrant of Gyre Strait", "Sol Ring", "Andúril, Flame of the West")
 POOL = ("Fire // Ice", "Cyclonic Rift", "Andúril, Flame of the West")
@@ -327,10 +325,9 @@ def test_ten_names_are_shown_whole_and_eleven_are_cut_to_ten():
     assert _some(names) == ", ".join(names[:10]) + " and 1 more"
 
 
-def test_the_hidden_folder_setting_is_dot_data_unless_the_config_names_another(tmp_path, monkeypatch):
+def test_the_hidden_folder_setting_is_dot_data_unless_the_config_names_another(no_config):
     """config.HIDDEN_FOLDER is ".data"; load() returns a Config whose hidden_folder is ".data" when
     the config names none; the config riffle init writes has a hidden_folder = ".data" line."""
-    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
     assert config.HIDDEN_FOLDER == ".data"
     assert config.load().hidden_folder == ".data"
     path = config.write_default()
@@ -353,11 +350,10 @@ def test_the_hidden_folder_setting_is_dot_data_unless_the_config_names_another(t
         ("5", "is 5, not a folder's name"),
     ],
 )
-def test_a_hidden_folder_that_cant_be_used_is_named_and_dot_data_used(tmp_path, monkeypatch, value, why):
+def test_a_hidden_folder_that_cant_be_used_is_named_and_dot_data_used(no_config, value, why):
     """A hidden_folder that can't be used adds one line to Config.unread, and .data is used: a string
     that doesn't start with a dot, or not one folder's name ("", ".", "..", a name with a / in it, or
     a value that isn't a string); a string is shown in double quotes, anything else as Python's repr."""
-    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
     config.write_default().write_text(f"hidden_folder = {value}\n")
     cfg = config.load()
     assert cfg.hidden_folder == ".data"
@@ -365,17 +361,12 @@ def test_a_hidden_folder_that_cant_be_used_is_named_and_dot_data_used(tmp_path, 
 
 
 @pytest.fixture
-def home(tmp_path, monkeypatch, opened):
+def home(bare_mtg, opened, prices_kept):
     """A one-deck vault under a fake HOME, the in-memory catalog, and a price snapshot kept."""
-    monkeypatch.setenv("HOME", str(tmp_path))
-    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / ".config"))
-    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / ".local" / "share"))
-    (tmp_path / ".config" / "riffle").mkdir(parents=True)
-    monkeypatch.setattr(scryfall, "snapshot_prices", lambda: (Path("/d/2026-09-26.jsonl.gz"), False))
-    mtg = tmp_path / "vault" / "games" / "tcg" / "mtg"
-    (mtg / "commander").mkdir(parents=True)
-    (mtg / "commander" / "aesi-lands.md").write_text(_note(*IN_VIEW))
-    return mtg
+    config.config_path().parent.mkdir(parents=True)
+    (bare_mtg / "commander").mkdir(parents=True)
+    (bare_mtg / "commander" / "aesi-lands.md").write_text(_note(*IN_VIEW))
+    return bare_mtg
 
 
 def _settings(line: str) -> None:
@@ -397,7 +388,7 @@ def test_the_sync_names_the_logs_moved_and_the_notes_removed_ten_at_most(home):
         (log / f"pool-{n:02}-versions.md").write_text(f"history {n}\n")
     for n in range(1011):
         (gen / f"stale-{n:04}-data.md").write_text("stale")
-    result = CliRunner().invoke(app, ["sync", "--offline"])
+    result = invoke("sync", "--offline")
     assert result.exit_code == 0, result.output
     lines = result.output.splitlines()
     versions = next(
@@ -427,7 +418,7 @@ def test_a_hidden_folder_without_a_leading_dot_is_named_and_dot_data_used(home, 
     pool = home / ".data" / "commander" / "pool-fire.md"
     pool.parent.mkdir(parents=True)
     pool.write_text(_note(*POOL))
-    result = CliRunner().invoke(app, ["sync", "--offline"])
+    result = invoke("sync", "--offline")
     assert result.exit_code == 0, result.output
     assert (
         'setting: hidden_folder in ~/.config/riffle/config.toml is "data", which doesn\'t start with a '

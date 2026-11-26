@@ -7,14 +7,14 @@ import json
 from datetime import UTC, datetime, timedelta
 
 import pytest
-from typer.testing import CliRunner
 
 from riffle import locks, net, runs
-from riffle.cli import app
 from riffle.cli._common import _complete_store
 from riffle.ingest.remote import _empties as empties
 from riffle.ingest.remote import pricelists
 from riffle.watch import watching
+from tests.conftest import invoke
+from tests.ingest.remote.conftest import Source
 
 AT = datetime(2026, 9, 27, 20, 51, 50, tzinfo=UTC)  # 13:51 in Seattle
 SINGLES, SEALED = pricelists.CARD_KINGDOM
@@ -44,32 +44,15 @@ def mp(as_of: str = "2026-09-27T20:23:47.529Z") -> bytes:
     return json.dumps({"meta": {"as_of": as_of}, "data": rows}).encode()
 
 
-class Store:
-    """The stores as net.fetch_new: url -> body, None (404), or an exception to raise, and an
-    ETag per url for a store that sends them. Records every (url, ETag sent)."""
+class Store(Source):
+    """The stores: an ETag per url for a store that sends them, with every answer."""
 
     def __init__(self, answers: dict[str, bytes | None | Exception], tags: dict[str, str] | None = None):
-        self.answers = answers
-        self.tags = tags or {}
-        self.asked: list[tuple[str, str | None]] = []
+        super().__init__(answers)
+        self.tags, self.tag_known = tags or {}, True
 
-    def fetch(self, url, dest, known, etag=None, accept="*/*", progress=None):
-        self.asked.append((url, etag))
-        body = self.answers.get(url)
-        if isinstance(body, Exception):
-            raise body
-        if body is None:
-            return None
-        tag = self.tags.get(url)
-        if etag is not None and etag == tag:
-            return net.Fetched("unchanged", b"", etag)
-        head = body[: net.HEAD]
-        if known(head):
-            return net.Fetched("known", head, tag)
-        dest.write_bytes(body)
-        if progress:
-            progress(len(body), None)
-        return net.Fetched("new", head, tag, len(body))
+    def tag(self, url: str, body: bytes) -> str | None:
+        return self.tags.get(url)
 
 
 def answers(**overrides) -> dict[str, bytes | None | Exception]:
@@ -80,8 +63,8 @@ def answers(**overrides) -> dict[str, bytes | None | Exception]:
 
 def run(store: Store, tracker=None, at: datetime = AT, lists=pricelists.CARD_KINGDOM) -> pricelists.Watch:
     if tracker is None:
-        return pricelists.watch(lists, fetch=store.fetch, clock=lambda: at)
-    return pricelists.watch(lists, fetch=store.fetch, tracker=tracker, clock=lambda: at)
+        return pricelists.watch(lists, fetch=store.fetch_new, clock=lambda: at)
+    return pricelists.watch(lists, fetch=store.fetch_new, tracker=tracker, clock=lambda: at)
 
 
 def kept(data_dir, store: str = "cardkingdom", name: str = "singles") -> dict:
@@ -91,12 +74,6 @@ def kept(data_dir, store: str = "cardkingdom", name: str = "singles") -> dict:
 def logged(data_dir, store: str = "cardkingdom") -> list[dict]:
     """The store's log, without how long each check took (seconds)."""
     return [{k: v for k, v in entry.items() if k != "seconds"} for entry in watching.entries(store)]
-
-
-@pytest.fixture
-def data_dir(tmp_path, monkeypatch):
-    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path))
-    return tmp_path / "riffle"
 
 
 def test_the_first_list_is_kept_whole_as_its_run_s_base(data_dir, tracker):
@@ -170,10 +147,10 @@ def test_mana_pool_s_etag_is_sent_and_a_304_asks_nothing_more(data_dir, tracker)
         "Mana Pool variants",
         "Mana Pool sealed",
     ]
-    assert first.asked == [(url, None) for url in urls]
+    assert first.sent == [(url, None) for url in urls]
     again = Store(urls, tags)
     res = run(again, tracker, lists=pricelists.MANA_POOL)
-    assert again.asked == list(tags.items()) and len(res.same) == 3
+    assert again.sent == list(tags.items()) and len(res.same) == 3
     assert tracker.outcomes()["Mana Pool singles"] == ("ok", "no new list since the last one kept")
     assert logged(data_dir, "manapool")[-1] == {
         "at": "2026-09-27T205150Z",
@@ -187,13 +164,13 @@ def test_mana_pool_s_etag_is_sent_and_a_304_asks_nothing_more(data_dir, tracker)
     ]
 
 
-def test_an_etag_is_kept_only_once_its_list_is(data_dir):
+def test_an_etag_is_kept_only_once_its_list_is():
     url = pricelists.MANA_POOL[0].url
     unstamped = json.dumps({"meta": {}, "data": [{"a": 1}]}).encode()
     run(Store({url: unstamped}, {url: '"1"'}), lists=pricelists.MANA_POOL[:1])
     again = Store({url: mp()}, {url: '"1"'})
     assert run(again, lists=pricelists.MANA_POOL[:1]).kept == ["Mana Pool singles"]
-    assert again.asked == [(url, None)]  # the unstamped list's ETag wasn't kept, so it's asked whole
+    assert again.sent == [(url, None)]  # the unstamped list's ETag wasn't kept, so it's asked whole
 
 
 def test_an_unreadable_etag_file_is_no_etags(data_dir):
@@ -216,11 +193,11 @@ def test_an_empty_list_keeps_nothing_and_is_asked_again(data_dir, tracker, body)
     assert kept(data_dir) == {}
     store = Store(answers(**{SINGLES.url: body}))
     run(store)
-    assert [url for url, _ in store.asked] == [SINGLES.url, SEALED.url]
+    assert [url for url, _ in store.sent] == [SINGLES.url, SEALED.url]
     assert logged(data_dir)[0]["result"] == "empty"
 
 
-def test_a_list_empty_seven_runs_in_a_row_is_a_warning_and_still_asked(data_dir, tracker):
+def test_a_list_empty_seven_runs_in_a_row_is_a_warning_and_still_asked(tracker):
     empty = b'{"data": []}'
     for n in range(6):
         run(Store(answers(**{SINGLES.url: empty})), at=datetime(2026, 9, 21 + n, 20, 0, tzinfo=UTC))
@@ -298,7 +275,7 @@ def test_a_list_with_no_stamp_is_named_by_its_etag(data_dir, tracker):
     assert watching.load_tags("manapool").get(pricelists.MANA_POOL[0].name) is None  # asked for whole again
 
 
-def test_a_list_made_after_it_was_fetched_warns_that_the_zone_is_wrong(data_dir, tracker):
+def test_a_list_made_after_it_was_fetched_warns_that_the_zone_is_wrong(tracker):
     run(Store(answers(**{SINGLES.url: ck(made="2026-09-27 21:00:00")})), tracker)
     outcome, said = tracker.outcomes()["Card Kingdom singles"]
     assert outcome == "warn" and said.endswith(
@@ -338,7 +315,7 @@ def test_a_run_finding_the_store_s_lock_held_asks_nothing(data_dir, tracker):
     with locks.held(data_dir / "cardkingdom" / "watch.lock") as mine:
         assert mine
         res = run(store, tracker)
-    assert res.busy and store.asked == [] and watching.files("cardkingdom") == []
+    assert res.busy and store.sent == [] and watching.files("cardkingdom") == []
     assert tracker.outcomes() == {"Card Kingdom": ("ok", "another run is asking for its lists")}
 
 
@@ -369,17 +346,17 @@ def test_a_body_that_isnt_a_whole_list_is_set_aside_and_no_list_kept(data_dir, t
     assert sorted(p.name for p in (data_dir / "cardkingdom" / "lists").iterdir()) == ["sealed"]
 
 
-def test_a_list_ending_in_a_newline_is_kept(data_dir):
+def test_a_list_ending_in_a_newline_is_kept():
     assert "Card Kingdom singles" in run(Store(answers(**{SINGLES.url: ck() + b"\n"}))).kept
 
 
-def test_a_big_list_is_checked_at_its_ends(data_dir):
+def test_a_big_list_is_checked_at_its_ends():
     rows = ck(20_000)
     assert len(rows) > 8192
     assert "Card Kingdom singles" in run(Store(answers(**{SINGLES.url: rows}))).kept
 
 
-def test_failures_are_asked_again_the_next_run(data_dir, tracker):
+def test_failures_are_asked_again_the_next_run(tracker):
     run(Store(answers(**{SINGLES.url: net.FetchError("HTTP 503"), SEALED.url: None})), tracker)
     assert tracker.outcomes() == {
         "Card Kingdom singles": ("fail", "HTTP 503"),
@@ -391,7 +368,7 @@ def test_failures_are_asked_again_the_next_run(data_dir, tracker):
 def test_no_answer_skips_the_store_s_other_lists(data_dir):
     store = Store(answers(**{SINGLES.url: net.NoAnswer("no answer after 3 tries (timed out)")}))
     res = run(store)
-    assert store.asked == [(SINGLES.url, None)]
+    assert store.sent == [(SINGLES.url, None)]
     assert res.failed == [
         ("Card Kingdom singles", "no answer after 3 tries (timed out)"),
         ("Card Kingdom sealed", "not asked: Card Kingdom gave no answer"),
@@ -433,41 +410,35 @@ def test_a_file_with_no_gzip_time_has_no_fetch_time(tmp_path):
 # ---- riffle watch <store> ----------------------------------------------------------------------
 
 
-@pytest.fixture
-def cli(data_dir, tmp_path, monkeypatch):
-    monkeypatch.setenv("HOME", str(tmp_path))
-    return lambda *args: CliRunner().invoke(app, list(args))
-
-
-def test_riffle_watch_keeps_a_store_s_lists(cli, monkeypatch):
+def test_riffle_watch_keeps_a_store_s_lists(monkeypatch):
     calls = []
     monkeypatch.setattr(pricelists, "watch", lambda lists, tracker: calls.append(lists) or pricelists.Watch())
-    assert cli("watch", "manapool").exit_code == 0 and calls == [pricelists.MANA_POOL]
+    assert invoke("watch", "manapool").exit_code == 0 and calls == [pricelists.MANA_POOL]
 
 
-def test_riffle_watch_exits_1_when_a_list_fails(cli, monkeypatch):
+def test_riffle_watch_exits_1_when_a_list_fails(monkeypatch):
     def failing(lists, tracker):
         tracker.step("Mana Pool singles").fail("HTTP 503")
         return pricelists.Watch()
 
     monkeypatch.setattr(pricelists, "watch", failing)
-    result = cli("watch", "manapool")
+    result = invoke("watch", "manapool")
     assert result.exit_code == 1 and "1 step failed: Mana Pool singles" in result.output
 
 
-def test_riffle_watch_names_the_stores_when_given_another(cli, plain):
-    result = cli("watch", "tcgplayer")
+def test_riffle_watch_names_the_stores_when_given_another(plain):
+    result = invoke("watch", "tcgplayer")
     said = "'tcgplayer' has no lists to watch; the stores: cardkingdom, manapool, cardmarket, tcgcsv"
     assert result.exit_code == 2 and said in plain(result.output)
 
 
-def test_riffle_watch_runs_tcgcsv_s_and_cardmarket_s_watches(cli, monkeypatch):
+def test_riffle_watch_runs_tcgcsv_s_and_cardmarket_s_watches(monkeypatch):
     from riffle.ingest.remote import cardmarket, tcgcsv
 
     calls = []
     monkeypatch.setattr(tcgcsv, "watch", lambda tracker: calls.append("tcgcsv"))
     monkeypatch.setattr(cardmarket, "watch", lambda tracker: calls.append("cardmarket"))
-    assert cli("watch", "tcgcsv").exit_code == 0 and cli("watch", "cardmarket").exit_code == 0
+    assert invoke("watch", "tcgcsv").exit_code == 0 and invoke("watch", "cardmarket").exit_code == 0
     assert calls == ["tcgcsv", "cardmarket"]
 
 
@@ -481,11 +452,11 @@ def test_a_check_is_logged_to_the_second(data_dir):
     assert {e["at"] for e in logged(data_dir)} == {"2026-09-27T205150Z"}
 
 
-def test_a_list_already_kept_under_a_new_etag_keeps_the_new_etag(data_dir):
+def test_a_list_already_kept_under_a_new_etag_keeps_the_new_etag():
     url = pricelists.MANA_POOL[0].url
     run(Store({url: mp()}, {url: '"1"'}), lists=pricelists.MANA_POOL[:1])
     moved = Store({url: mp()}, {url: '"2"'})  # the same list, served again under a new ETag
     assert run(moved, lists=pricelists.MANA_POOL[:1]).same == ["Mana Pool singles"]
     again = Store({url: mp()}, {url: '"2"'})
     run(again, lists=pricelists.MANA_POOL[:1])
-    assert moved.asked == [(url, '"1"')] and again.asked == [(url, '"2"')]
+    assert moved.sent == [(url, '"1"')] and again.sent == [(url, '"2"')]
